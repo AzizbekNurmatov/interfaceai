@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Northbridge Core Banking — Teller Workstation</title>
+    <style>
+      :root {
+        font-family: "Segoe UI", Tahoma, sans-serif;
+        color: #1b1b1b;
+        background: #d6d2c4;
+      }
+      body {
+        margin: 0;
+        min-height: 100vh;
+      }
+      header {
+        background: #1f4e3d;
+        color: #f4efd8;
+        padding: 12px 20px;
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+      }
+      header small {
+        opacity: 0.8;
+      }
+      main {
+        max-width: 560px;
+        margin: 32px auto;
+        background: #f7f4ea;
+        border: 2px solid #7a725c;
+        padding: 24px;
+      }
+      label {
+        display: block;
+        margin: 12px 0 4px;
+        font-weight: 600;
+      }
+      input {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 8px;
+        border: 1px solid #7a725c;
+        background: #fff;
+      }
+      button {
+        margin-top: 16px;
+        background: #1f4e3d;
+        color: #f4efd8;
+        border: 0;
+        padding: 10px 16px;
+        cursor: pointer;
+      }
+      .error {
+        margin-top: 16px;
+        padding: 10px;
+        background: #f3d6d0;
+        border: 1px solid #8a2b2b;
+        color: #5c1010;
+      }
+      .hidden {
+        display: none;
+      }
+      .balance {
+        font-size: 28px;
+        margin: 8px 0 0;
+      }
+      .meta {
+        color: #555;
+        font-size: 13px;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <strong>Northbridge Core Banking</strong>
+      <small>Teller Workstation v4.12 — no API</small>
+    </header>
+    <main>
+      <section id="login-panel">
+        <h1>Teller Sign-On</h1>
+        <label for="username">Username</label>
+        <input id="username" name="username" autocomplete="username" />
+        <label for="password">Password</label>
+        <input id="password" name="password" type="password" autocomplete="current-password" />
+        <button type="button" id="sign-on">Sign On</button>
+        <div id="login-error" class="error hidden" role="alert" data-testid="login-error"></div>
+      </section>
+
+      <section id="lookup-panel" class="hidden">
+        <h1>Account Inquiry</h1>
+        <p class="meta">Signed on as <span id="teller-name"></span></p>
+        <label for="account-number">Account Number</label>
+        <input id="account-number" name="accountNumber" inputmode="numeric" />
+        <button type="button" id="lookup">Look Up Account</button>
+        <div id="business-error" class="error hidden" role="alert" data-testid="business-error"></div>
+        <div id="result" class="hidden">
+          <h2>Inquiry Result</h2>
+          <p class="meta">Status: <span id="account-status">Open</span></p>
+          <p>Available balance</p>
+          <p id="available-balance" class="balance" data-testid="available-balance"></p>
+        </div>
+      </section>
+    </main>
+    <script>
+      const ACCOUNTS = {
+        "12345678": { status: "open", balance: "$4,250.00" },
+        "00000000": { status: "closed", balance: "$0.00" },
+      };
+
+      const loginPanel = document.getElementById("login-panel");
+      const lookupPanel = document.getElementById("lookup-panel");
+      const loginError = document.getElementById("login-error");
+      const businessError = document.getElementById("business-error");
+      const result = document.getElementById("result");
+
+      document.getElementById("sign-on").addEventListener("click", () => {
+        const username = document.getElementById("username").value.trim();
+        const password = document.getElementById("password").value;
+        loginError.classList.add("hidden");
+        if (username === "teller" && password === "password") {
+          document.getElementById("teller-name").textContent = username;
+          loginPanel.classList.add("hidden");
+          lookupPanel.classList.remove("hidden");
+          return;
+        }
+        loginError.textContent = "Invalid teller credentials.";
+        loginError.classList.remove("hidden");
+      });
+
+      document.getElementById("lookup").addEventListener("click", () => {
+        const accountNumber = document.getElementById("account-number").value.trim();
+        businessError.classList.add("hidden");
+        result.classList.add("hidden");
+        const account = ACCOUNTS[accountNumber];
+        if (!account) {
+          businessError.textContent = "Account not found.";
+          businessError.classList.remove("hidden");
+          return;
+        }
+        if (account.status === "closed") {
+          businessError.textContent = "Account 00000000 is closed. Inquiry is not permitted.";
+          businessError.classList.remove("hidden");
+          return;
+        }
+        document.getElementById("account-status").textContent = "Open";
+        document.getElementById("available-balance").textContent = account.balance;
+        result.classList.remove("hidden");
+      });
+    </script>
+  </body>
+</html>

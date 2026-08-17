@@ -1,0 +1,334 @@
+{
+  "schemaVersion": "1.0.0",
+  "id": "check-account-balance",
+  "name": "Check Account Balance",
+  "version": "1.0.0",
+  "description": "Sign on to the Northbridge teller workstation and look up an open account's available balance.",
+  "application": {
+    "name": "Northbridge Core Banking — Teller Workstation",
+    "baseUrl": "fixtures/legacy-bank/index.html"
+  },
+  "parameters": [
+    {
+      "name": "username",
+      "type": "string",
+      "required": true,
+      "description": "Teller workstation username.",
+      "default": "teller"
+    },
+    {
+      "name": "password",
+      "type": "secret",
+      "required": true,
+      "description": "Teller workstation password.",
+      "maskInLogs": true
+    },
+    {
+      "name": "accountNumber",
+      "type": "string",
+      "required": true,
+      "description": "Customer account number to inquire."
+    }
+  ],
+  "expectedOutputs": [
+    {
+      "name": "availableBalance",
+      "type": "string",
+      "description": "Available balance displayed after a successful inquiry.",
+      "extract": {
+        "method": "innerText",
+        "target": {
+          "description": "Available balance amount",
+          "primary": {
+            "strategy": "css",
+            "value": "#available-balance"
+          },
+          "fallbacks": [
+            {
+              "strategy": "testId",
+              "value": "available-balance"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "accountStatus",
+      "type": "string",
+      "description": "Account status label on the inquiry result.",
+      "extract": {
+        "method": "innerText",
+        "target": {
+          "description": "Account status",
+          "primary": {
+            "strategy": "css",
+            "value": "#account-status"
+          },
+          "fallbacks": []
+        }
+      }
+    }
+  ],
+  "businessFailures": [
+    {
+      "code": "INVALID_CREDENTIALS",
+      "description": "Teller sign-on was rejected.",
+      "recoverable": true,
+      "target": {
+        "description": "Login error banner",
+        "primary": {
+          "strategy": "css",
+          "value": "#login-error"
+        },
+        "fallbacks": [
+          {
+            "strategy": "testId",
+            "value": "login-error"
+          }
+        ],
+        "timeoutMs": 1500
+      },
+      "messagePattern": "Invalid teller credentials"
+    },
+    {
+      "code": "ACCOUNT_CLOSED",
+      "description": "The account exists but is closed; inquiry is not permitted.",
+      "recoverable": false,
+      "target": {
+        "description": "Business error banner on inquiry",
+        "primary": {
+          "strategy": "css",
+          "value": "#business-error"
+        },
+        "fallbacks": [
+          {
+            "strategy": "testId",
+            "value": "business-error"
+          }
+        ],
+        "timeoutMs": 1500
+      },
+      "messagePattern": "closed"
+    },
+    {
+      "code": "ACCOUNT_NOT_FOUND",
+      "description": "No account exists for the supplied number.",
+      "recoverable": true,
+      "target": {
+        "description": "Business error banner on inquiry",
+        "primary": {
+          "strategy": "css",
+          "value": "#business-error"
+        },
+        "fallbacks": [
+          {
+            "strategy": "testId",
+            "value": "business-error"
+          }
+        ],
+        "timeoutMs": 1500
+      },
+      "messagePattern": "not found"
+    }
+  ],
+  "preconditions": [
+    {
+      "id": "on-sign-on-screen",
+      "description": "The teller sign-on heading is visible before automation starts.",
+      "assertions": [
+        {
+          "id": "sign-on-heading",
+          "kind": "visible",
+          "onMismatch": "hard",
+          "target": {
+            "description": "Teller Sign-On heading",
+            "primary": {
+              "strategy": "role",
+              "value": "heading",
+              "roleName": "Teller Sign-On"
+            },
+            "fallbacks": [
+              {
+                "strategy": "text",
+                "value": "Teller Sign-On",
+                "exact": true
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "steps": [
+    {
+      "id": "open-workstation",
+      "name": "Open teller workstation",
+      "action": "navigate",
+      "url": "{baseUrl}"
+    },
+    {
+      "id": "enter-username",
+      "name": "Enter teller username",
+      "action": "fill",
+      "target": {
+        "description": "Username field",
+        "primary": {
+          "strategy": "label",
+          "value": "Username"
+        },
+        "fallbacks": [
+          {
+            "strategy": "role",
+            "value": "textbox",
+            "roleName": "Username"
+          },
+          {
+            "strategy": "css",
+            "value": "#username"
+          }
+        ]
+      },
+      "input": {
+        "source": "parameter",
+        "parameter": "username"
+      }
+    },
+    {
+      "id": "enter-password",
+      "name": "Enter teller password",
+      "action": "fill",
+      "target": {
+        "description": "Password field",
+        "primary": {
+          "strategy": "label",
+          "value": "Password"
+        },
+        "fallbacks": [
+          {
+            "strategy": "css",
+            "value": "#password"
+          }
+        ]
+      },
+      "input": {
+        "source": "parameter",
+        "parameter": "password"
+      }
+    },
+    {
+      "id": "submit-sign-on",
+      "name": "Submit sign-on",
+      "action": "click",
+      "target": {
+        "description": "Sign On button",
+        "primary": {
+          "strategy": "role",
+          "value": "button",
+          "roleName": "Sign On"
+        },
+        "fallbacks": [
+          {
+            "strategy": "css",
+            "value": "#sign-on"
+          }
+        ]
+      },
+      "checkpoint": {
+        "id": "signed-on-or-rejected",
+        "description": "Either the inquiry screen appears, or credentials were rejected (business failure scanned after the step).",
+        "assertions": [
+          {
+            "id": "inquiry-or-login-error",
+            "kind": "visible",
+            "onMismatch": "hard",
+            "target": {
+              "description": "Account Inquiry heading or login error",
+              "primary": {
+                "strategy": "role",
+                "value": "heading",
+                "roleName": "Account Inquiry"
+              },
+              "fallbacks": [
+                {
+                  "strategy": "css",
+                  "value": "#login-error"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "enter-account-number",
+      "name": "Enter account number",
+      "action": "fill",
+      "target": {
+        "description": "Account Number field",
+        "primary": {
+          "strategy": "label",
+          "value": "Account Number"
+        },
+        "fallbacks": [
+          {
+            "strategy": "css",
+            "value": "#account-number"
+          }
+        ]
+      },
+      "input": {
+        "source": "parameter",
+        "parameter": "accountNumber"
+      }
+    },
+    {
+      "id": "submit-inquiry",
+      "name": "Submit account inquiry",
+      "action": "click",
+      "target": {
+        "description": "Look Up Account button",
+        "primary": {
+          "strategy": "role",
+          "value": "button",
+          "roleName": "Look Up Account"
+        },
+        "fallbacks": [
+          {
+            "strategy": "css",
+            "value": "#lookup"
+          }
+        ]
+      }
+    }
+  ],
+  "postconditions": [
+    {
+      "id": "balance-visible",
+      "description": "Successful inquiry shows an available balance.",
+      "assertions": [
+        {
+          "id": "balance-amount-visible",
+          "kind": "visible",
+          "onMismatch": "hard",
+          "target": {
+            "description": "Available balance amount",
+            "primary": {
+              "strategy": "css",
+              "value": "#available-balance"
+            },
+            "fallbacks": [
+              {
+                "strategy": "testId",
+                "value": "available-balance"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "metadata": {
+    "discoveredAt": "2026-08-17T19:00:00.000Z",
+    "notes": "Seeded from the local legacy-bank fixture. Replace with Discovery Script output for a real host."
+  }
+}

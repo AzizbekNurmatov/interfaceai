@@ -1,0 +1,531 @@
+import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
+import type { Page } from "playwright";
+import type {
+  Assertion,
+  Capability,
+  Checkpoint,
+  OutputValues,
+  ParameterValues,
+  Step,
+  StepInput,
+  Target,
+  WaitSpec,
+} from "../types/capability.js";
+import { BusinessFailure, HardFailure, ValidationFailure } from "../types/errors.js";
+import { handoffToHuman, type HitlDecision } from "./hitl.js";
+import { describeLocator, isTargetVisible, resolveTarget } from "./locators.js";
+
+export interface ReplayOptions {
+  page: Page;
+  capability: Capability;
+  parameters: ParameterValues;
+  /**
+   * When true (default in CLI), HardFailure triggers page.pause() + CLI prompt.
+   * Tests should set this to false and assert on HardFailure instead.
+   */
+  hitl?: boolean;
+}
+
+export interface ReplaySuccess {
+  status: "success";
+  outputs: OutputValues;
+}
+
+export interface ReplayBusinessResult {
+  status: "business_failure";
+  failure: BusinessFailure;
+  outputs: OutputValues;
+}
+
+export type ReplayResult = ReplaySuccess | ReplayBusinessResult;
+
+const MAX_HITL_RETRIES = 3;
+
+export class ReplayEngine {
+  private readonly page: Page;
+  private readonly capability: Capability;
+  private readonly parameters: ParameterValues;
+  private readonly hitl: boolean;
+  private readonly outputs: OutputValues = {};
+
+  constructor(options: ReplayOptions) {
+    this.page = options.page;
+    this.capability = options.capability;
+    this.parameters = options.parameters;
+    this.hitl = options.hitl ?? true;
+  }
+
+  async run(): Promise<ReplayResult> {
+    this.assertParameters();
+
+    try {
+      const steps = this.capability.steps;
+      let start = 0;
+      if (steps[0]?.action === "navigate") {
+        await this.runStepWithHitl(steps[0]);
+        start = 1;
+      } else {
+        await this.page.goto(toGotoUrl(this.interpolate("{baseUrl}")), {
+          waitUntil: "domcontentloaded",
+        });
+      }
+
+      await this.runCheckpoints(this.capability.preconditions, "precondition");
+      const landingFailure = await this.detectBusinessFailure("precondition");
+      if (landingFailure) {
+        return { status: "business_failure", failure: landingFailure, outputs: { ...this.outputs } };
+      }
+
+      for (const step of steps.slice(start)) {
+        await this.runStepWithHitl(step);
+      }
+
+      await this.extractDeclaredOutputs();
+      await this.runCheckpoints(this.capability.postconditions, "postcondition");
+
+      return { status: "success", outputs: { ...this.outputs } };
+    } catch (error) {
+      if (error instanceof BusinessFailure) {
+        return { status: "business_failure", failure: error, outputs: { ...this.outputs } };
+      }
+      throw error;
+    }
+  }
+
+  private assertParameters(): void {
+    const issues: string[] = [];
+    for (const def of this.capability.parameters) {
+      const value = this.parameters[def.name];
+      if (value === undefined || value === "") {
+        if (def.required && def.default === undefined) {
+          issues.push(`Missing required parameter "${def.name}"`);
+        }
+        continue;
+      }
+      if (def.type === "enum" && def.enumValues && !def.enumValues.includes(String(value))) {
+        issues.push(`Parameter "${def.name}" must be one of: ${def.enumValues.join(", ")}`);
+      }
+    }
+    if (issues.length > 0) {
+      throw new ValidationFailure("Replay parameters are invalid", issues);
+    }
+  }
+
+  private async runStepWithHitl(step: Step): Promise<void> {
+    let attempts = 0;
+    for (;;) {
+      try {
+        await this.executeStep(step);
+        const business = await this.detectBusinessFailure(step.id);
+        if (business) throw business;
+        if (step.checkpoint) {
+          await this.runCheckpoint(step.checkpoint);
+        }
+        if (step.waitAfter) {
+          await this.wait(step.waitAfter, step.id);
+        }
+        return;
+      } catch (error) {
+        if (error instanceof BusinessFailure) throw error;
+        if (!(error instanceof HardFailure)) {
+          throw new HardFailure(
+            error instanceof Error ? error.message : String(error),
+            { stepId: step.id, cause: error },
+          );
+        }
+        if (!this.hitl) throw error;
+
+        attempts += 1;
+        if (attempts > MAX_HITL_RETRIES) {
+          throw new HardFailure(`HITL retry limit exceeded for step ${step.id}`, {
+            stepId: step.id,
+            cause: error,
+          });
+        }
+
+        const decision: HitlDecision = await handoffToHuman(this.page, error);
+        if (decision === "abort") throw error;
+        if (decision === "skip") {
+          if (!step.optional) {
+            throw new HardFailure(
+              `HITL skipped a required step "${step.id}". Mark the step optional in the capability to allow this.`,
+              { stepId: step.id, cause: error },
+            );
+          }
+          return;
+        }
+      }
+    }
+  }
+
+  private async executeStep(step: Step): Promise<void> {
+    switch (step.action) {
+      case "navigate": {
+        if (!step.url) {
+          throw new HardFailure("navigate step is missing url", { stepId: step.id });
+        }
+        const url = toGotoUrl(this.interpolate(step.url));
+        await this.page.goto(url, { waitUntil: "domcontentloaded" });
+        this.assertOrigin(step.id);
+        return;
+      }
+      case "click":
+      case "dblclick":
+      case "hover":
+      case "check":
+      case "uncheck":
+      case "assertVisible": {
+        const resolved = await this.requireTarget(step);
+        if (!resolved) return;
+        if (step.action === "click") await resolved.locator.click();
+        else if (step.action === "dblclick") await resolved.locator.dblclick();
+        else if (step.action === "hover") await resolved.locator.hover();
+        else if (step.action === "check") await resolved.locator.check();
+        else if (step.action === "uncheck") await resolved.locator.uncheck();
+        return;
+      }
+      case "assertHidden": {
+        if (!step.target) {
+          throw new HardFailure("assertHidden step is missing target", { stepId: step.id });
+        }
+        const visible = await isTargetVisible(this.page, step.target);
+        if (visible) {
+          throw new HardFailure(`Expected "${step.target.description}" to be hidden`, {
+            stepId: step.id,
+            locatorDescription: step.target.description,
+          });
+        }
+        return;
+      }
+      case "fill":
+      case "type":
+      case "select":
+      case "assertText": {
+        const resolved = await this.requireTarget(step);
+        if (!resolved) return;
+        const value = String(this.resolveInput(step.input, step.id));
+        if (step.action === "fill") await resolved.locator.fill(value);
+        else if (step.action === "type") await resolved.locator.pressSequentially(value);
+        else if (step.action === "select") await resolved.locator.selectOption({ label: value });
+        else {
+          const text = await resolved.locator.innerText();
+          if (!text.includes(value)) {
+            throw new HardFailure(
+              `Expected "${step.target?.description}" to contain "${value}", got "${text}"`,
+              { stepId: step.id, locatorDescription: step.target?.description },
+            );
+          }
+        }
+        return;
+      }
+      case "press": {
+        if (!step.key) {
+          throw new HardFailure("press step is missing key", { stepId: step.id });
+        }
+        if (step.target) {
+          const resolved = await this.requireTarget(step);
+          if (!resolved) return;
+          await resolved.locator.press(step.key);
+        } else {
+          await this.page.keyboard.press(step.key);
+        }
+        return;
+      }
+      case "waitFor": {
+        if (!step.waitAfter) {
+          throw new HardFailure("waitFor step is missing waitAfter", { stepId: step.id });
+        }
+        await this.wait(step.waitAfter, step.id);
+        return;
+      }
+      case "extract": {
+        if (!step.extractTo) {
+          throw new HardFailure("extract step is missing extractTo", { stepId: step.id });
+        }
+        const resolved = await this.requireTarget(step);
+        if (!resolved) return;
+        this.outputs[step.extractTo] = (await resolved.locator.innerText()).trim();
+        return;
+      }
+      case "screenshot": {
+        await this.page.screenshot({ fullPage: true });
+        return;
+      }
+      default: {
+        const exhaustive: never = step.action;
+        throw new HardFailure(`Unsupported action: ${String(exhaustive)}`, { stepId: step.id });
+      }
+    }
+  }
+
+  private async requireTarget(step: Step) {
+    if (!step.target) {
+      throw new HardFailure(`Step "${step.id}" (${step.action}) is missing target`, {
+        stepId: step.id,
+      });
+    }
+    try {
+      return await resolveTarget(this.page, step.target, step.id);
+    } catch (error) {
+      if (error instanceof HardFailure && step.optional) {
+        return undefined;
+      }
+      throw error;
+    }
+  }
+
+  private resolveInput(input: StepInput | undefined, stepId: string): string | number | boolean {
+    if (!input) {
+      throw new HardFailure(`Step "${stepId}" is missing input`, { stepId });
+    }
+    if (input.source === "literal") {
+      if (input.literal === undefined) {
+        throw new HardFailure(`Step "${stepId}" literal input is empty`, { stepId });
+      }
+      return input.literal;
+    }
+    if (input.source === "parameter") {
+      const name = input.parameter;
+      if (!name) {
+        throw new HardFailure(`Step "${stepId}" parameter input is missing name`, { stepId });
+      }
+      const def = this.capability.parameters.find((p) => p.name === name);
+      const value = this.parameters[name] ?? def?.default;
+      if (value === undefined) {
+        throw new ValidationFailure(`Parameter "${name}" has no value`, [`step ${stepId}`]);
+      }
+      return value;
+    }
+    if (input.source === "output") {
+      const name = input.output;
+      if (!name) {
+        throw new HardFailure(`Step "${stepId}" output input is missing name`, { stepId });
+      }
+      const value = this.outputs[name];
+      if (value === undefined) {
+        throw new HardFailure(`Output "${name}" has not been extracted yet`, { stepId });
+      }
+      return value;
+    }
+    const exhaustive: never = input.source;
+    throw new HardFailure(`Unknown input source: ${String(exhaustive)}`, { stepId });
+  }
+
+  private interpolate(template: string): string {
+    return template.replace(/\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (_match, name: string) => {
+      if (name === "baseUrl") return this.capability.application.baseUrl;
+      const def = this.capability.parameters.find((p) => p.name === name);
+      const value = this.parameters[name] ?? def?.default;
+      if (value === undefined) {
+        throw new ValidationFailure(`Cannot interpolate {${name}}: parameter is missing`);
+      }
+      return String(value);
+    });
+  }
+
+  private assertOrigin(stepId: string): void {
+    const pattern = this.capability.application.originPattern;
+    if (!pattern) return;
+    const url = this.page.url();
+    if (!new RegExp(pattern).test(url)) {
+      throw new HardFailure(
+        `Page URL "${url}" does not match application originPattern /${pattern}/`,
+        { stepId },
+      );
+    }
+  }
+
+  private async wait(spec: WaitSpec, stepId: string): Promise<void> {
+    const timeout = spec.timeoutMs ?? 10_000;
+    switch (spec.kind) {
+      case "timeout":
+        await this.page.waitForTimeout(timeout);
+        return;
+      case "url":
+        if (!spec.urlPattern) {
+          throw new HardFailure("waitFor url is missing urlPattern", { stepId });
+        }
+        await this.page.waitForURL(new RegExp(spec.urlPattern), { timeout });
+        return;
+      case "selector": {
+        if (!spec.target) {
+          throw new HardFailure("waitFor selector is missing target", { stepId });
+        }
+        await resolveTarget(this.page, spec.target, stepId);
+        return;
+      }
+      case "loadState":
+        await this.page.waitForLoadState(spec.loadState ?? "domcontentloaded", { timeout });
+        return;
+      default: {
+        const exhaustive: never = spec.kind;
+        throw new HardFailure(`Unsupported wait kind: ${String(exhaustive)}`, { stepId });
+      }
+    }
+  }
+
+  private async runCheckpoints(checkpoints: Checkpoint[], label: string): Promise<void> {
+    for (const checkpoint of checkpoints) {
+      await this.runCheckpoint(checkpoint, label);
+    }
+  }
+
+  private async runCheckpoint(checkpoint: Checkpoint, label = "checkpoint"): Promise<void> {
+    for (const assertion of checkpoint.assertions) {
+      await this.runAssertion(assertion, `${label}:${checkpoint.id}`);
+    }
+  }
+
+  private async runAssertion(assertion: Assertion, stepId: string): Promise<void> {
+    const mismatch = async (message: string, observedText?: string) => {
+      if (assertion.onMismatch === "business") {
+        const code = assertion.businessFailureCode ?? "BUSINESS_ASSERTION_FAILED";
+        const signal = this.capability.businessFailures.find((s) => s.code === code);
+        throw new BusinessFailure(code, message, {
+          stepId,
+          recoverable: signal?.recoverable ?? false,
+          observedText,
+        });
+      }
+      throw new HardFailure(message, { stepId, locatorDescription: assertion.target?.description });
+    };
+
+    switch (assertion.kind) {
+      case "urlMatches": {
+        const pattern = assertion.urlPattern ?? assertion.expected;
+        if (!pattern) {
+          throw new HardFailure(`Assertion ${assertion.id} is missing urlPattern`, { stepId });
+        }
+        if (!new RegExp(pattern).test(this.page.url())) {
+          await mismatch(`URL "${this.page.url()}" does not match /${pattern}/`);
+        }
+        return;
+      }
+      case "visible":
+      case "hidden":
+      case "textContains":
+      case "textEquals":
+      case "valueEquals": {
+        if (!assertion.target) {
+          throw new HardFailure(`Assertion ${assertion.id} is missing target`, { stepId });
+        }
+        if (assertion.kind === "hidden") {
+          const visible = await isTargetVisible(this.page, assertion.target);
+          if (visible) await mismatch(`Expected "${assertion.target.description}" to be hidden`);
+          return;
+        }
+        if (assertion.kind === "visible") {
+          try {
+            await resolveTarget(this.page, assertion.target, stepId);
+          } catch (error) {
+            if (error instanceof HardFailure) {
+              await mismatch(error.message);
+              return;
+            }
+            throw error;
+          }
+          return;
+        }
+        let resolved;
+        try {
+          resolved = await resolveTarget(this.page, assertion.target, stepId);
+        } catch (error) {
+          if (error instanceof HardFailure) {
+            await mismatch(error.message);
+            return;
+          }
+          throw error;
+        }
+        if (assertion.kind === "textContains" || assertion.kind === "textEquals") {
+          const text = (await resolved.locator.innerText()).trim();
+          const expected = assertion.expected ?? "";
+          const ok = assertion.kind === "textEquals" ? text === expected : text.includes(expected);
+          if (!ok) await mismatch(`Text assertion failed. expected="${expected}" actual="${text}"`, text);
+          return;
+        }
+        const value = await resolved.locator.inputValue();
+        if (value !== (assertion.expected ?? "")) {
+          await mismatch(
+            `Value assertion failed. expected="${assertion.expected}" actual="${value}"`,
+            value,
+          );
+        }
+        return;
+      }
+      default: {
+        const exhaustive: never = assertion.kind;
+        throw new HardFailure(`Unsupported assertion kind: ${String(exhaustive)}`, { stepId });
+      }
+    }
+  }
+
+  /**
+   * Scan known business-failure banners after each step.
+   * Visibility of a declared signal is a BusinessFailure, never a HardFailure.
+   */
+  private async detectBusinessFailure(stepId: string): Promise<BusinessFailure | undefined> {
+    for (const signal of this.capability.businessFailures) {
+      if (!(await isTargetVisible(this.page, signal.target))) continue;
+      const resolved = await resolveTarget(this.page, signal.target, stepId);
+      const text = (await resolved.locator.innerText()).trim();
+      if (signal.messagePattern && !new RegExp(signal.messagePattern).test(text)) continue;
+      return new BusinessFailure(signal.code, signal.description, {
+        stepId,
+        recoverable: signal.recoverable,
+        observedText: text,
+      });
+    }
+    return undefined;
+  }
+
+  private async extractDeclaredOutputs(): Promise<void> {
+    for (const output of this.capability.expectedOutputs) {
+      if (this.outputs[output.name] !== undefined) continue;
+      const spec = output.extract;
+      let raw: string;
+      if (spec.method === "url") {
+        raw = this.page.url();
+      } else {
+        if (!spec.target) {
+          throw new HardFailure(`Output "${output.name}" extract is missing target`);
+        }
+        const resolved = await resolveTarget(this.page, spec.target);
+        if (spec.method === "innerText") raw = (await resolved.locator.innerText()).trim();
+        else if (spec.method === "inputValue") raw = await resolved.locator.inputValue();
+        else {
+          if (!spec.attribute) {
+            throw new HardFailure(`Output "${output.name}" extract is missing attribute`);
+          }
+          raw = (await resolved.locator.getAttribute(spec.attribute)) ?? "";
+        }
+      }
+      this.outputs[output.name] = applyPattern(raw, spec.pattern);
+    }
+  }
+}
+
+function applyPattern(raw: string, pattern?: string): string {
+  if (!pattern) return raw;
+  const match = raw.match(new RegExp(pattern));
+  if (!match) {
+    throw new HardFailure(`Extracted text "${raw}" did not match pattern /${pattern}/`);
+  }
+  return match[1] ?? match[0];
+}
+
+/** Exported for tests that need to format locator attempts. */
+export function locatorDebug(target: Target): string {
+  return [target.primary, ...target.fallbacks].map(describeLocator).join(" | ");
+}
+
+function toGotoUrl(url: string): string {
+  if (
+    url.startsWith("http://") ||
+    url.startsWith("https://") ||
+    url.startsWith("file:")
+  ) {
+    return url;
+  }
+  return pathToFileURL(resolve(url)).href;
+}

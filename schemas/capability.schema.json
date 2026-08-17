@@ -1,0 +1,455 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://interface.ai/schemas/capability.schema.json",
+  "title": "Capability Artifact",
+  "description": "Deterministic UI automation contract produced by the Discovery Script and consumed exclusively by the Replay Engine. The Replay Engine must never call an LLM; every locator, input, output, and checkpoint required to execute the flow lives in this document.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "id",
+    "name",
+    "version",
+    "description",
+    "application",
+    "parameters",
+    "expectedOutputs",
+    "businessFailures",
+    "preconditions",
+    "steps",
+    "postconditions",
+    "metadata"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "const": "1.0.0",
+      "description": "Version of this JSON schema, not the capability itself."
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$",
+      "description": "Stable machine identifier, e.g. check-account-balance."
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Human-readable capability name."
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+      "description": "Semver of this capability artifact. Bump when locators or steps change."
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1
+    },
+    "application": {
+      "$ref": "#/$defs/application"
+    },
+    "parameters": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/parameter" },
+      "description": "Inputs the Replay Engine interpolates into steps. Discovery records names and types; callers supply values at replay time."
+    },
+    "expectedOutputs": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/expectedOutput" },
+      "description": "Values the Replay Engine must extract on a successful run."
+    },
+    "businessFailures": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/businessFailureSignal" },
+      "description": "Known in-app outcomes that are valid business results, not locator breakage. Checked after every step and at checkpoints."
+    },
+    "preconditions": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/checkpoint" },
+      "description": "Assertions that must hold before the first step (correct app, logged-out landing, etc.)."
+    },
+    "steps": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/step" }
+    },
+    "postconditions": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/checkpoint" },
+      "description": "Assertions that must hold after the last step on a successful run."
+    },
+    "metadata": {
+      "$ref": "#/$defs/metadata"
+    }
+  },
+  "$defs": {
+    "application": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "baseUrl"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "baseUrl": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Origin or file URL used as {baseUrl} in navigate steps."
+        },
+        "originPattern": {
+          "type": "string",
+          "description": "Optional regex the current page URL must match as a safety check."
+        }
+      }
+    },
+    "locatorStrategy": {
+      "type": "string",
+      "enum": [
+        "role",
+        "label",
+        "placeholder",
+        "text",
+        "altText",
+        "title",
+        "testId",
+        "css",
+        "xpath"
+      ],
+      "description": "Playwright locator strategy. Prefer role/label/text; css/xpath are last-resort fallbacks."
+    },
+    "locator": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["strategy", "value"],
+      "properties": {
+        "strategy": { "$ref": "#/$defs/locatorStrategy" },
+        "value": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Role name (button, textbox), accessible name, CSS, XPath, etc. depending on strategy."
+        },
+        "roleName": {
+          "type": "string",
+          "description": "Accessible name when strategy is role, e.g. getByRole('button', { name: roleName })."
+        },
+        "exact": {
+          "type": "boolean",
+          "default": false
+        },
+        "nth": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Disambiguate when multiple nodes match."
+        }
+      }
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["description", "primary", "fallbacks"],
+      "properties": {
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "description": "What this control is, for logs and HITL."
+        },
+        "primary": { "$ref": "#/$defs/locator" },
+        "fallbacks": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/locator" },
+          "description": "Tried in order if primary does not resolve to a visible, enabled control."
+        },
+        "timeoutMs": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 5000
+        }
+      }
+    },
+    "parameter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "type", "required", "description"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+        },
+        "type": {
+          "type": "string",
+          "enum": ["string", "number", "boolean", "secret", "enum"]
+        },
+        "required": { "type": "boolean" },
+        "description": { "type": "string" },
+        "enumValues": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1
+        },
+        "default": {
+          "type": ["string", "number", "boolean"]
+        },
+        "maskInLogs": {
+          "type": "boolean",
+          "default": false,
+          "description": "True for PINs, passwords, SSNs. Forced true when type is secret."
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "type": { "const": "enum" } }
+          },
+          "then": {
+            "required": ["enumValues"]
+          }
+        }
+      ]
+    },
+    "expectedOutput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "type", "description", "extract"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+        },
+        "type": {
+          "type": "string",
+          "enum": ["string", "number", "boolean"]
+        },
+        "description": { "type": "string" },
+        "extract": { "$ref": "#/$defs/extractSpec" }
+      }
+    },
+    "extractSpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["method"],
+      "properties": {
+        "target": { "$ref": "#/$defs/target" },
+        "method": {
+          "type": "string",
+          "enum": ["innerText", "inputValue", "attribute", "url"]
+        },
+        "attribute": {
+          "type": "string",
+          "description": "Required when method is attribute."
+        },
+        "pattern": {
+          "type": "string",
+          "description": "Optional regex; capture group 1 is stored if present, else the full match."
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "method": { "const": "url" } },
+            "required": ["method"]
+          },
+          "then": {
+            "not": { "required": ["target"] }
+          },
+          "else": {
+            "required": ["target"]
+          }
+        },
+        {
+          "if": {
+            "properties": { "method": { "const": "attribute" } }
+          },
+          "then": {
+            "required": ["attribute"]
+          }
+        }
+      ]
+    },
+    "stepInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source"],
+      "properties": {
+        "source": {
+          "type": "string",
+          "enum": ["parameter", "literal", "output"]
+        },
+        "parameter": {
+          "type": "string",
+          "description": "Name of a capability parameter. Required when source is parameter."
+        },
+        "literal": {
+          "type": ["string", "number", "boolean"],
+          "description": "Required when source is literal."
+        },
+        "output": {
+          "type": "string",
+          "description": "Name of a previously extracted output. Required when source is output."
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "source": { "const": "parameter" } } },
+          "then": { "required": ["parameter"] }
+        },
+        {
+          "if": { "properties": { "source": { "const": "literal" } } },
+          "then": { "required": ["literal"] }
+        },
+        {
+          "if": { "properties": { "source": { "const": "output" } } },
+          "then": { "required": ["output"] }
+        }
+      ]
+    },
+    "waitSpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["timeout", "url", "selector", "loadState"]
+        },
+        "timeoutMs": { "type": "integer", "minimum": 0 },
+        "urlPattern": { "type": "string" },
+        "target": { "$ref": "#/$defs/target" },
+        "loadState": {
+          "type": "string",
+          "enum": ["load", "domcontentloaded", "networkidle"]
+        }
+      }
+    },
+    "assertion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "onMismatch"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "visible",
+            "hidden",
+            "textContains",
+            "textEquals",
+            "urlMatches",
+            "valueEquals"
+          ]
+        },
+        "target": { "$ref": "#/$defs/target" },
+        "expected": { "type": "string" },
+        "urlPattern": { "type": "string" },
+        "onMismatch": {
+          "type": "string",
+          "enum": ["hard", "business"],
+          "description": "hard → locator/UI drift (HITL). business → expected application outcome (no HITL)."
+        },
+        "businessFailureCode": {
+          "type": "string",
+          "description": "Required when onMismatch is business; must match a businessFailures[].code."
+        }
+      }
+    },
+    "checkpoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "description", "assertions"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "description": { "type": "string" },
+        "assertions": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/assertion" }
+        }
+      }
+    },
+    "businessFailureSignal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "description", "target", "recoverable"],
+      "properties": {
+        "code": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]*$",
+          "description": "Stable code, e.g. ACCOUNT_CLOSED, INSUFFICIENT_FUNDS."
+        },
+        "description": { "type": "string" },
+        "target": {
+          "$ref": "#/$defs/target",
+          "description": "If this target is visible, the run is a BusinessFailure with this code."
+        },
+        "messagePattern": {
+          "type": "string",
+          "description": "Optional regex against the target's text to confirm the signal."
+        },
+        "recoverable": {
+          "type": "boolean",
+          "description": "If true, a caller may retry with different parameters. If false, do not retry the same intent."
+        }
+      }
+    },
+    "step": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "action"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "name": { "type": "string", "minLength": 1 },
+        "action": {
+          "type": "string",
+          "enum": [
+            "navigate",
+            "click",
+            "dblclick",
+            "fill",
+            "type",
+            "select",
+            "check",
+            "uncheck",
+            "press",
+            "hover",
+            "waitFor",
+            "extract",
+            "assertVisible",
+            "assertHidden",
+            "assertText",
+            "screenshot"
+          ]
+        },
+        "url": {
+          "type": "string",
+          "description": "For navigate. Supports {baseUrl} and {parameterName} interpolation."
+        },
+        "target": { "$ref": "#/$defs/target" },
+        "input": { "$ref": "#/$defs/stepInput" },
+        "key": {
+          "type": "string",
+          "description": "Keyboard key for press, e.g. Enter."
+        },
+        "waitAfter": { "$ref": "#/$defs/waitSpec" },
+        "checkpoint": { "$ref": "#/$defs/checkpoint" },
+        "extractTo": {
+          "type": "string",
+          "description": "Output name to store an extract action into."
+        },
+        "optional": {
+          "type": "boolean",
+          "default": false,
+          "description": "If true, a missing target skips the step instead of HardFailure (cookie banners, optional modals)."
+        }
+      }
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "discoveredAt": { "type": "string", "format": "date-time" },
+        "lastVerifiedAt": { "type": "string", "format": "date-time" },
+        "notes": { "type": "string" }
+      }
+    }
+  }
+}
