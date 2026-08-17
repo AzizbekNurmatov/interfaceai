@@ -5,7 +5,7 @@
  * Callers must branch on `kind` (and `instanceof`) to decide HITL vs return.
  */
 
-export type ReplayErrorKind = "business" | "hard" | "validation";
+export type ReplayErrorKind = "business" | "hard" | "validation" | "safety";
 
 export abstract class ReplayError extends Error {
   abstract readonly kind: ReplayErrorKind;
@@ -22,8 +22,8 @@ export abstract class ReplayError extends Error {
 
 /**
  * The application produced a known, valid business outcome
- * (account closed, insufficient funds, user not found).
- * This is NOT an automation defect. Do not invoke HITL.
+ * (member not found, account locked). This is NOT an automation defect.
+ * Do not invoke HITL.
  */
 export class BusinessFailure extends ReplayError {
   readonly kind = "business" as const;
@@ -49,8 +49,8 @@ export class BusinessFailure extends ReplayError {
 }
 
 /**
- * The automation contract broke: locator missed, timeout, unexpected screen,
- * navigation to the wrong origin. Invoke HITL (`page.pause()` + CLI).
+ * The automation contract broke: locator missed, timeout, unexpected screen.
+ * Invoke HITL (`page.pause()` + CLI).
  */
 export class HardFailure extends ReplayError {
   readonly kind = "hard" as const;
@@ -86,6 +86,20 @@ export class ValidationFailure extends ReplayError {
   }
 }
 
+/**
+ * A safety policy blocked the action (off-domain navigation, banned keyword).
+ * Abort. Do not invoke HITL.
+ */
+export class SafetyViolation extends ReplayError {
+  readonly kind = "safety" as const;
+  readonly rule: string;
+
+  constructor(rule: string, message: string, options?: { stepId?: string; cause?: unknown }) {
+    super(message, options);
+    this.rule = rule;
+  }
+}
+
 export function isBusinessFailure(error: unknown): error is BusinessFailure {
   return error instanceof BusinessFailure;
 }
@@ -96,4 +110,8 @@ export function isHardFailure(error: unknown): error is HardFailure {
 
 export function isValidationFailure(error: unknown): error is ValidationFailure {
   return error instanceof ValidationFailure;
+}
+
+export function isSafetyViolation(error: unknown): error is SafetyViolation {
+  return error instanceof SafetyViolation;
 }

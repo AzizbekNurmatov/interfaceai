@@ -1,16 +1,18 @@
 import { expect, test } from "@playwright/test";
 import { resolve } from "node:path";
 import { loadCapabilityFile, validateCapability } from "../src/schema/validate.js";
-import { ValidationFailure } from "../src/types/errors.js";
+import { ValidationFailure } from "../src/schema/errors.js";
 
-const SAMPLE = resolve("capabilities/check-account-balance.json");
+const SAMPLE = resolve("capabilities/member-balance-inquiry.json");
 
-test("sample capability satisfies the JSON schema", () => {
+test("sample capability satisfies the Zod schema", () => {
   const capability = loadCapabilityFile(SAMPLE);
-  expect(capability.id).toBe("check-account-balance");
+  expect(capability.id).toBe("member-balance-inquiry");
   expect(capability.schemaVersion).toBe("1.0.0");
   expect(capability.steps.length).toBeGreaterThan(0);
-  expect(capability.businessFailures.map((f) => f.code)).toContain("ACCOUNT_CLOSED");
+  expect(capability.businessFailures.map((f) => f.code)).toEqual(
+    expect.arrayContaining(["MEMBER_NOT_FOUND", "ACCOUNT_LOCKED"]),
+  );
 });
 
 test("rejects artifacts that omit required contract fields", () => {

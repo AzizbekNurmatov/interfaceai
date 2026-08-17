@@ -1,18 +1,13 @@
 import * as readline from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
 import type { Page } from "playwright";
-import type { HardFailure } from "../types/errors.js";
+import type { HardFailure } from "../schema/errors.js";
 
 export type HitlDecision = "retry" | "skip" | "abort";
 
 /**
  * Mock Human-In-The-Loop handoff.
- *
- * 1. Playwright `page.pause()` opens the inspector so an operator can
- *    inspect / manually click / fix the page.
- * 2. After the operator resumes, a CLI prompt records the control decision.
- *
- * Discovery (LLM) is never consulted here.
+ * Playwright `page.pause()` + CLI prompt. Discovery (LLM) is never consulted.
  */
 export async function handoffToHuman(page: Page, failure: HardFailure): Promise<HitlDecision> {
   const lines = [
@@ -33,7 +28,6 @@ export async function handoffToHuman(page: Page, failure: HardFailure): Promise<
   ].filter((line) => line !== undefined);
 
   console.error(lines.join("\n"));
-
   await page.pause();
 
   const rl = readline.createInterface({ input, output });

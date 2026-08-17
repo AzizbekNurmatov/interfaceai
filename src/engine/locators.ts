@@ -1,6 +1,6 @@
 import type { Locator, Page } from "playwright";
-import type { Locator as CapabilityLocator, Target } from "../types/capability.js";
-import { HardFailure } from "../types/errors.js";
+import type { Locator as CapabilityLocator, Target } from "../schema/capability.js";
+import { HardFailure } from "../schema/errors.js";
 
 const DEFAULT_TIMEOUT_MS = 5_000;
 
@@ -69,11 +69,6 @@ export interface ResolvedTarget {
   attempted: string[];
 }
 
-/**
- * Resolve primary, then fallbacks. A candidate counts as resolved when it
- * is visible within the target timeout. Missing targets become HardFailure
- * unless the caller treats the step as optional.
- */
 export async function resolveTarget(
   page: Page,
   target: Target,
@@ -105,7 +100,6 @@ export async function resolveTarget(
   );
 }
 
-/** Non-waiting probe used to scan business-failure banners. */
 export async function isTargetVisible(page: Page, target: Target): Promise<boolean> {
   const candidates = [target.primary, ...target.fallbacks];
   for (const spec of candidates) {

@@ -1,0 +1,375 @@
+{
+  "schemaVersion": "1.0.0",
+  "id": "member-balance-inquiry",
+  "name": "Member Balance Inquiry",
+  "version": "1.0.0",
+  "description": "Log on to MemberCore 7.4 and look up savings/checking balances by member ID.",
+  "application": {
+    "name": "MemberCore 7.4 — Teller Workstation",
+    "baseUrl": "http://127.0.0.1:3000",
+    "originPattern": "^https?://(127\\.0\\.0\\.1|localhost):3000"
+  },
+  "parameters": [
+    {
+      "name": "username",
+      "type": "string",
+      "required": true,
+      "description": "RACF / teller user ID.",
+      "default": "TELLER01"
+    },
+    {
+      "name": "password",
+      "type": "secret",
+      "required": true,
+      "description": "Teller password.",
+      "maskInLogs": true
+    },
+    {
+      "name": "memberId",
+      "type": "string",
+      "required": true,
+      "description": "Member ID to inquire."
+    }
+  ],
+  "expectedOutputs": [
+    {
+      "name": "memberName",
+      "type": "string",
+      "description": "Member name from the inquiry table.",
+      "extract": {
+        "method": "innerText",
+        "target": {
+          "description": "Member Name value",
+          "primary": {
+            "strategy": "xpath",
+            "value": "//td[contains(., 'Member Name')]/following-sibling::td[1]"
+          },
+          "fallbacks": []
+        }
+      }
+    },
+    {
+      "name": "savingsBalance",
+      "type": "string",
+      "description": "Savings balance displayed after a successful inquiry.",
+      "extract": {
+        "method": "innerText",
+        "target": {
+          "description": "Savings Balance value",
+          "primary": {
+            "strategy": "xpath",
+            "value": "//td[contains(., 'Savings Balance')]/following-sibling::td[1]"
+          },
+          "fallbacks": []
+        }
+      }
+    },
+    {
+      "name": "checkingBalance",
+      "type": "string",
+      "description": "Checking balance displayed after a successful inquiry.",
+      "extract": {
+        "method": "innerText",
+        "target": {
+          "description": "Checking Balance value",
+          "primary": {
+            "strategy": "xpath",
+            "value": "//td[contains(., 'Checking Balance')]/following-sibling::td[1]"
+          },
+          "fallbacks": []
+        }
+      }
+    },
+    {
+      "name": "accountStatus",
+      "type": "string",
+      "description": "Member status on the inquiry result.",
+      "extract": {
+        "method": "innerText",
+        "target": {
+          "description": "Status value",
+          "primary": {
+            "strategy": "xpath",
+            "value": "//td[contains(., 'Status')]/following-sibling::td[1]"
+          },
+          "fallbacks": []
+        }
+      }
+    }
+  ],
+  "businessFailures": [
+    {
+      "code": "INVALID_CREDENTIALS",
+      "description": "Teller logon was rejected.",
+      "recoverable": true,
+      "target": {
+        "description": "Logon error banner",
+        "primary": {
+          "strategy": "css",
+          "value": "#tblError"
+        },
+        "fallbacks": [
+          {
+            "strategy": "xpath",
+            "value": "//b[contains(., 'LOGON FAILED')]"
+          }
+        ]
+      },
+      "messagePattern": "LOGON FAILED"
+    },
+    {
+      "code": "MEMBER_NOT_FOUND",
+      "description": "No member record exists for the supplied ID.",
+      "recoverable": true,
+      "target": {
+        "description": "Member search error banner",
+        "primary": {
+          "strategy": "css",
+          "value": "#tblError"
+        },
+        "fallbacks": [
+          {
+            "strategy": "xpath",
+            "value": "//b[contains(., 'Member record not found')]"
+          }
+        ]
+      },
+      "messagePattern": "not found"
+    },
+    {
+      "code": "ACCOUNT_LOCKED",
+      "description": "The member exists but is locked for compliance review.",
+      "recoverable": false,
+      "target": {
+        "description": "Member search error banner",
+        "primary": {
+          "strategy": "css",
+          "value": "#tblError"
+        },
+        "fallbacks": [
+          {
+            "strategy": "xpath",
+            "value": "//b[contains(., 'Account locked')]"
+          }
+        ]
+      },
+      "messagePattern": "locked"
+    }
+  ],
+  "preconditions": [
+    {
+      "id": "on-logon-screen",
+      "description": "Teller logon form is visible after opening the workstation.",
+      "assertions": [
+        {
+          "id": "logon-heading",
+          "kind": "visible",
+          "onMismatch": "hard",
+          "target": {
+            "description": "Teller Workstation Logon heading",
+            "primary": {
+              "strategy": "text",
+              "value": "Teller Workstation Logon"
+            },
+            "fallbacks": [
+              {
+                "strategy": "css",
+                "value": "input[name='btnLogon']"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "steps": [
+    {
+      "id": "open-logon",
+      "name": "Open teller logon",
+      "action": "navigate",
+      "url": "{baseUrl}/login"
+    },
+    {
+      "id": "enter-username",
+      "name": "Enter teller user ID",
+      "action": "fill",
+      "target": {
+        "description": "User ID field",
+        "primary": {
+          "strategy": "css",
+          "value": "input[name='txtUID']"
+        },
+        "fallbacks": [
+          {
+            "strategy": "xpath",
+            "value": "//input[@name='txtUID']"
+          }
+        ]
+      },
+      "input": {
+        "source": "parameter",
+        "parameter": "username"
+      }
+    },
+    {
+      "id": "enter-password",
+      "name": "Enter teller password",
+      "action": "fill",
+      "target": {
+        "description": "Password field",
+        "primary": {
+          "strategy": "css",
+          "value": "input[name='txtPWD']"
+        },
+        "fallbacks": [
+          {
+            "strategy": "xpath",
+            "value": "//input[@name='txtPWD']"
+          }
+        ]
+      },
+      "input": {
+        "source": "parameter",
+        "parameter": "password"
+      }
+    },
+    {
+      "id": "submit-logon",
+      "name": "Submit logon",
+      "action": "click",
+      "target": {
+        "description": "Logon button",
+        "primary": {
+          "strategy": "css",
+          "value": "input[name='btnLogon']"
+        },
+        "fallbacks": [
+          {
+            "strategy": "xpath",
+            "value": "//input[@name='btnLogon']"
+          }
+        ]
+      },
+      "waitAfter": {
+        "kind": "loadState",
+        "loadState": "domcontentloaded"
+      },
+      "checkpoint": {
+        "id": "signed-on-or-rejected",
+        "description": "Main menu appears, or logon was rejected.",
+        "assertions": [
+          {
+            "id": "menu-or-logon-error",
+            "kind": "visible",
+            "onMismatch": "hard",
+            "target": {
+              "description": "Main Menu heading or logon error",
+              "primary": {
+                "strategy": "text",
+                "value": "Main Menu"
+              },
+              "fallbacks": [
+                {
+                  "strategy": "css",
+                  "value": "#tblError"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "open-member-search",
+      "name": "Open Member Search",
+      "action": "click",
+      "target": {
+        "description": "Member Search link",
+        "primary": {
+          "strategy": "css",
+          "value": "a[href='/members/lookup']"
+        },
+        "fallbacks": [
+          {
+            "strategy": "text",
+            "value": "Member Search"
+          }
+        ]
+      },
+      "waitAfter": {
+        "kind": "loadState",
+        "loadState": "domcontentloaded"
+      }
+    },
+    {
+      "id": "enter-member-id",
+      "name": "Enter member ID",
+      "action": "fill",
+      "target": {
+        "description": "Member ID field",
+        "primary": {
+          "strategy": "css",
+          "value": "input[name='memID']"
+        },
+        "fallbacks": [
+          {
+            "strategy": "xpath",
+            "value": "//input[@name='memID']"
+          }
+        ]
+      },
+      "input": {
+        "source": "parameter",
+        "parameter": "memberId"
+      }
+    },
+    {
+      "id": "submit-inquiry",
+      "name": "Submit member file search",
+      "action": "click",
+      "target": {
+        "description": "Search Member File button",
+        "primary": {
+          "strategy": "css",
+          "value": "input[name='btnSearch']"
+        },
+        "fallbacks": [
+          {
+            "strategy": "xpath",
+            "value": "//input[@name='btnSearch']"
+          }
+        ]
+      },
+      "waitAfter": {
+        "kind": "loadState",
+        "loadState": "domcontentloaded",
+        "timeoutMs": 10000
+      }
+    }
+  ],
+  "postconditions": [
+    {
+      "id": "balances-visible",
+      "description": "Successful inquiry shows savings and checking balances.",
+      "assertions": [
+        {
+          "id": "savings-visible",
+          "kind": "visible",
+          "onMismatch": "hard",
+          "target": {
+            "description": "Savings Balance value",
+            "primary": {
+              "strategy": "xpath",
+              "value": "//td[contains(., 'Savings Balance')]/following-sibling::td[1]"
+            },
+            "fallbacks": []
+          }
+        }
+      ]
+    }
+  ],
+  "metadata": {
+    "discoveredAt": "2026-08-17T20:00:00.000Z",
+    "notes": "Seeded against the local MemberCore 7.4 mock. Hostile table layout; locators are name/xpath."
+  }
+}

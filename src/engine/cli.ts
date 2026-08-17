@@ -1,13 +1,16 @@
+import "dotenv/config";
 import { chromium, type Browser, type Page } from "playwright";
 import { formatValidationIssues, loadCapabilityFile } from "../schema/validate.js";
-import { ReplayEngine } from "./engine.js";
 import {
   isBusinessFailure,
   isHardFailure,
+  isSafetyViolation,
   isValidationFailure,
   ValidationFailure,
-} from "../types/errors.js";
-import type { ParameterValues } from "../types/capability.js";
+} from "../schema/errors.js";
+import type { ParameterValues } from "../schema/capability.js";
+import { logger } from "../utils/logger.js";
+import { ReplayEngine } from "./replay-engine.js";
 
 export interface CliArgs {
   capabilityPath: string;
@@ -84,10 +87,16 @@ export async function runReplayCli(argv = process.argv.slice(2)): Promise<number
 
     const result = await engine.run();
     if (result.status === "success") {
+      logger.info("replay succeeded", { outputs: result.outputs });
       console.log(JSON.stringify({ status: "success", outputs: result.outputs }, null, 2));
       return 0;
     }
 
+    logger.warn("replay business failure", {
+      code: result.failure.code,
+      message: result.failure.message,
+      observedText: result.failure.observedText,
+    });
     console.log(
       JSON.stringify(
         {
@@ -108,6 +117,17 @@ export async function runReplayCli(argv = process.argv.slice(2)): Promise<number
     if (isValidationFailure(error)) {
       console.error(formatValidationIssues(error));
       return 1;
+    }
+    if (isSafetyViolation(error)) {
+      logger.error("safety violation", { rule: error.rule, message: error.message });
+      console.error(
+        JSON.stringify(
+          { status: "safety_violation", rule: error.rule, message: error.message, stepId: error.stepId },
+          null,
+          2,
+        ),
+      );
+      return 4;
     }
     if (isHardFailure(error)) {
       console.error(
@@ -136,7 +156,7 @@ export async function runReplayCli(argv = process.argv.slice(2)): Promise<number
   }
 }
 
-const isDirect = process.argv[1]?.includes("replay") || process.argv[1]?.includes("cli");
+const isDirect = /engine[/\\]cli\.ts$/.test(process.argv[1] ?? "");
 if (isDirect) {
   runReplayCli().then((code) => process.exit(code));
 }

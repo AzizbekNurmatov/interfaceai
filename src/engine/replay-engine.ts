@@ -11,8 +11,15 @@ import type {
   StepInput,
   Target,
   WaitSpec,
-} from "../types/capability.js";
-import { BusinessFailure, HardFailure, ValidationFailure } from "../types/errors.js";
+} from "../schema/capability.js";
+import {
+  BusinessFailure,
+  HardFailure,
+  SafetyViolation,
+  ValidationFailure,
+} from "../schema/errors.js";
+import { getGuardrails } from "../safety/guardrails.js";
+import { captureEvidence } from "../utils/screenshots.js";
 import { handoffToHuman, type HitlDecision } from "./hitl.js";
 import { describeLocator, isTargetVisible, resolveTarget } from "./locators.js";
 
@@ -66,9 +73,9 @@ export class ReplayEngine {
         await this.runStepWithHitl(steps[0]);
         start = 1;
       } else {
-        await this.page.goto(toGotoUrl(this.interpolate("{baseUrl}")), {
-          waitUntil: "domcontentloaded",
-        });
+        const url = toGotoUrl(this.interpolate("{baseUrl}"));
+        getGuardrails().assertNavigationAllowed(url);
+        await this.page.goto(url, { waitUntil: "domcontentloaded" });
       }
 
       await this.runCheckpoints(this.capability.preconditions, "precondition");
@@ -127,7 +134,7 @@ export class ReplayEngine {
         }
         return;
       } catch (error) {
-        if (error instanceof BusinessFailure) throw error;
+        if (error instanceof BusinessFailure || error instanceof SafetyViolation) throw error;
         if (!(error instanceof HardFailure)) {
           throw new HardFailure(
             error instanceof Error ? error.message : String(error),
@@ -160,12 +167,15 @@ export class ReplayEngine {
   }
 
   private async executeStep(step: Step): Promise<void> {
+    getGuardrails().assertStepAllowed(step);
+
     switch (step.action) {
       case "navigate": {
         if (!step.url) {
           throw new HardFailure("navigate step is missing url", { stepId: step.id });
         }
         const url = toGotoUrl(this.interpolate(step.url));
+        getGuardrails().assertNavigationAllowed(url, step.id);
         await this.page.goto(url, { waitUntil: "domcontentloaded" });
         this.assertOrigin(step.id);
         return;
@@ -249,7 +259,7 @@ export class ReplayEngine {
         return;
       }
       case "screenshot": {
-        await this.page.screenshot({ fullPage: true });
+        await captureEvidence(this.page, `replay-${step.id}`);
         return;
       }
       default: {
@@ -325,6 +335,7 @@ export class ReplayEngine {
   }
 
   private assertOrigin(stepId: string): void {
+    getGuardrails().assertNavigationAllowed(this.page.url(), stepId);
     const pattern = this.capability.application.originPattern;
     if (!pattern) return;
     const url = this.page.url();
@@ -460,10 +471,6 @@ export class ReplayEngine {
     }
   }
 
-  /**
-   * Scan known business-failure banners after each step.
-   * Visibility of a declared signal is a BusinessFailure, never a HardFailure.
-   */
   private async detectBusinessFailure(stepId: string): Promise<BusinessFailure | undefined> {
     for (const signal of this.capability.businessFailures) {
       if (!(await isTargetVisible(this.page, signal.target))) continue;
@@ -514,17 +521,12 @@ function applyPattern(raw: string, pattern?: string): string {
   return match[1] ?? match[0];
 }
 
-/** Exported for tests that need to format locator attempts. */
 export function locatorDebug(target: Target): string {
   return [target.primary, ...target.fallbacks].map(describeLocator).join(" | ");
 }
 
 function toGotoUrl(url: string): string {
-  if (
-    url.startsWith("http://") ||
-    url.startsWith("https://") ||
-    url.startsWith("file:")
-  ) {
+  if (url.startsWith("http://") || url.startsWith("https://") || url.startsWith("file:")) {
     return url;
   }
   return pathToFileURL(resolve(url)).href;

@@ -10,3 +10,5 @@ playwright/.cache/
 !.env.example
 .DS_Store
 Thumbs.db
+evidence/**
+!evidence/.gitkeep

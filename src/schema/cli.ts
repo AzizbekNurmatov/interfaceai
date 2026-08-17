@@ -1,5 +1,5 @@
-import { loadCapabilityFile, formatValidationIssues } from "./validate.js";
-import { isValidationFailure } from "../types/errors.js";
+import { formatValidationIssues, loadCapabilityFile } from "./validate.js";
+import { isValidationFailure } from "./errors.js";
 
 const path = process.argv[2];
 if (!path) {
