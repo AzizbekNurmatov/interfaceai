@@ -1,8 +1,8 @@
 import { defineConfig, devices } from "@playwright/test";
 
 /**
- * Playwright is the execution substrate for the Replay Engine only.
- * Discovery (LLM-driven) must never be invoked from these tests.
+ * Playwright drives both Replay tests and Discovery tests that use a scripted
+ * (non-network) LLM client. Live Anthropic calls belong only in `npm run discover`.
  */
 export default defineConfig({
   testDir: "./tests",

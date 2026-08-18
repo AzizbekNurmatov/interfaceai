@@ -25,7 +25,7 @@ export type {
   WaitKind,
   WaitSpec,
 } from "./capability.js";
-export { CAPABILITY_SCHEMA_VERSION, capabilitySchema } from "./capability.js";
+export { CAPABILITY_SCHEMA_VERSION, capabilitySchema, CapabilitySchema } from "./capability.js";
 export {
   BusinessFailure,
   HardFailure,

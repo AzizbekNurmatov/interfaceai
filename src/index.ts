@@ -20,7 +20,7 @@ export {
   ValidationFailure,
 } from "./schema/errors.js";
 export { ReplayEngine } from "./engine/replay-engine.js";
-export { saveCapability } from "./agent/index.js";
+export { saveCapability, runDiscoveryLoop } from "./agent/index.js";
 export { getGuardrails } from "./safety/guardrails.js";
 export { createApp } from "./server/app.js";
 export { startMockServer } from "./server/listen.js";

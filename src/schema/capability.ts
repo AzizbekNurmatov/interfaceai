@@ -248,6 +248,7 @@ export type Step = z.infer<typeof stepSchema>;
 export type ApplicationContext = z.infer<typeof applicationContextSchema>;
 export type CapabilityMetadata = z.infer<typeof capabilityMetadataSchema>;
 export type Capability = z.infer<typeof capabilitySchema>;
+export const CapabilitySchema = capabilitySchema;
 
 export type ParameterValues = Record<string, string | number | boolean>;
 export type OutputValues = Record<string, string | number | boolean>;
