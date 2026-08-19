@@ -126,11 +126,11 @@ export class ReplayEngine {
         await this.executeStep(step);
         const business = await this.detectBusinessFailure(step.id);
         if (business) throw business;
-        if (step.checkpoint) {
-          await this.runCheckpoint(step.checkpoint);
-        }
         if (step.waitAfter) {
           await this.wait(step.waitAfter, step.id);
+        }
+        if (step.checkpoint) {
+          await this.runCheckpoint(step.checkpoint);
         }
         return;
       } catch (error) {

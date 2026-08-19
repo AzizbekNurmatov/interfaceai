@@ -77,21 +77,194 @@ function inferParam(event: TraceEvent): { name: string; type: ParameterDef["type
   return undefined;
 }
 
-function checkpointFor(event: TraceEvent, id: string): Step["checkpoint"] | undefined {
-  if (!event.heading || event.tool === "type" || event.tool === "extract") return undefined;
+function upsertParameter(
+  parameters: Map<string, ParameterDef>,
+  param: { name: string; type: ParameterDef["type"] },
+  event: TraceEvent,
+): void {
+  const existing = parameters.get(param.name);
+  const defaultValue =
+    param.name === "username" && event.typedValue ? event.typedValue : existing?.default;
+  const hasDefault = defaultValue !== undefined;
+  parameters.set(param.name, {
+    name: param.name,
+    type: param.type,
+    required: !hasDefault,
+    description: existing?.description ?? `Discovered from field "${event.description ?? param.name}"`,
+    maskInLogs: param.type === "secret",
+    ...(hasDefault ? { default: defaultValue } : {}),
+  });
+}
+
+function uniqueLocators(locators: Locator[]): Locator[] {
+  const seen = new Set<string>();
+  const out: Locator[] = [];
+  for (const loc of locators) {
+    const key = `${loc.strategy}:${loc.value}:${loc.exact ?? ""}:${loc.nth ?? ""}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(loc);
+  }
+  return out;
+}
+
+function pathOf(url: string | undefined): string | undefined {
+  if (!url) return undefined;
+  try {
+    return new URL(url).pathname;
+  } catch {
+    return url;
+  }
+}
+
+function screenFromTitle(title: string | undefined): string | undefined {
+  const part = title?.split(" - ").at(-1)?.trim();
+  return part || undefined;
+}
+
+function isSameScreen(a?: string, b?: string): boolean {
+  if (!a || !b) return false;
+  if (a === b) return true;
+  const na = a.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const nb = b.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  if (na === nb) return true;
+  const logonA = /\blogon\b/.test(na);
+  const logonB = /\blogon\b/.test(nb);
+  return logonA && logonB;
+}
+
+function leftScreen(prev: TraceEvent | undefined): string | undefined {
+  return prev?.heading || screenFromTitle(prev?.titleAfter);
+}
+
+function xpathLiteral(value: string): string {
+  if (!value.includes("'")) return `'${value}'`;
+  if (!value.includes('"')) return `"${value}"`;
+  return `concat('${value.replace(/'/g, "',\"'\",'")}')`;
+}
+
+function cssTextLiteral(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
+
+/** CSS + text + tag/name locators for a destination heading. */
+function landmarkLocators(label: string): Locator[] {
+  const css = cssTextLiteral(label);
+  const xp = xpathLiteral(label);
+  return uniqueLocators([
+    { strategy: "text", value: label },
+    { strategy: "css", value: `b:has-text("${css}")` },
+    { strategy: "xpath", value: `//b[contains(., ${xp})]` },
+    { strategy: "css", value: `font:has-text("${css}")` },
+    { strategy: "xpath", value: `//font[contains(., ${xp})]` },
+  ]);
+}
+
+function targetFromLabel(label: string, extra: Locator[] = []): Target {
+  const locators = uniqueLocators([...landmarkLocators(label), ...extra]);
+  return {
+    description: label,
+    primary: locators[0]!,
+    fallbacks: locators.slice(1),
+  };
+}
+
+/**
+ * Identity of the page AFTER a click/navigate. Never the screen that was just left.
+ * Heading recorded on the click itself can still name the old page when the snapshot
+ * is taken before navigation settles — look at titleAfter, URL, then later events.
+ */
+function destinationScreen(
+  event: TraceEvent,
+  prev: TraceEvent | undefined,
+  succeeding: TraceEvent[],
+): string | undefined {
+  const left = leftScreen(prev);
+  const eventPath = pathOf(event.urlAfter);
+  const leftPath = pathOf(prev?.urlAfter);
+  const navigated = Boolean(leftPath && eventPath && leftPath !== eventPath);
+
+  const prefer = (label?: string): string | undefined =>
+    label && !isSameScreen(label, left) ? label : undefined;
+
+  if (navigated) {
+    return prefer(screenFromTitle(event.titleAfter)) ?? prefer(event.heading) ?? event.heading ?? screenFromTitle(event.titleAfter);
+  }
+
+  const immediate = prefer(screenFromTitle(event.titleAfter)) ?? prefer(event.heading);
+  if (immediate) return immediate;
+
+  for (const later of succeeding) {
+    if (!later.ok) continue;
+    const laterPath = pathOf(later.urlAfter);
+    const laterLeft = laterPath && leftPath && laterPath !== leftPath;
+    const laterLabel = prefer(later.heading) ?? prefer(screenFromTitle(later.titleAfter));
+    if (laterLeft || laterLabel) return laterLabel ?? later.heading ?? screenFromTitle(later.titleAfter);
+  }
+
+  return event.heading ?? screenFromTitle(event.titleAfter);
+}
+
+function destinationTarget(
+  event: TraceEvent,
+  prev: TraceEvent | undefined,
+  succeeding: TraceEvent[],
+): Target | undefined {
+  const left = leftScreen(prev);
+  const screen = destinationScreen(event, prev, succeeding);
+  const destPath = succeeding.find((later) => {
+    if (!later.ok) return false;
+    const laterPath = pathOf(later.urlAfter);
+    const leftPath = pathOf(prev?.urlAfter);
+    return Boolean(laterPath && leftPath && laterPath !== leftPath);
+  });
+  const destPathname = destPath ? pathOf(destPath.urlAfter) : pathOf(event.urlAfter);
+
+  const extra: Locator[] = [];
+  const next = succeeding.find((later) => later.ok && later.locators.length > 0 && later.tool !== "finish");
+  if (next) {
+    const nextScreen = next.heading ?? screenFromTitle(next.titleAfter);
+    const nextPath = pathOf(next.urlAfter);
+    const onDestination =
+      isSameScreen(nextScreen, screen) ||
+      Boolean(destPathname && nextPath && nextPath === destPathname);
+    if (onDestination && !isSameScreen(nextScreen, left)) {
+      extra.push(...next.locators);
+      if (next.description) extra.push({ strategy: "text", value: next.description });
+    }
+  }
+
+  if (screen && !isSameScreen(screen, left)) return targetFromLabel(screen, extra);
+  if (extra.length > 0) {
+    const locators = uniqueLocators(extra);
+    return {
+      description: next?.description || event.titleAfter || "destination control",
+      primary: locators[0]!,
+      fallbacks: locators.slice(1),
+    };
+  }
+  if (screen) return targetFromLabel(screen, extra);
+  return undefined;
+}
+
+function checkpointFor(
+  event: TraceEvent,
+  prev: TraceEvent | undefined,
+  succeeding: TraceEvent[],
+  id: string,
+): Step["checkpoint"] | undefined {
+  if (event.tool === "type" || event.tool === "extract") return undefined;
+  const target = destinationTarget(event, prev, succeeding);
+  if (!target) return undefined;
   return {
     id,
-    description: `Still on expected screen after ${event.tool}`,
+    description: `Destination screen after ${event.tool}`,
     assertions: [
       {
         id: `${id}-visible`,
         kind: "visible",
         onMismatch: "hard",
-        target: {
-          description: event.heading,
-          primary: { strategy: "text", value: event.heading },
-          fallbacks: [],
-        },
+        target,
       },
     ],
   };
@@ -157,6 +330,8 @@ export function synthesizeCapability(trace: DiscoveryTrace, options?: { id?: str
 
   for (const [index, event] of okEvents.entries()) {
     const id = `s${String(index + 1).padStart(2, "0")}-${event.tool}`;
+    const prev = okEvents[index - 1];
+    const succeeding = okEvents.slice(index + 1);
     if (event.tool === "navigate") {
       const url = String(event.input.url ?? trace.startUrl);
       steps.push({
@@ -165,7 +340,7 @@ export function synthesizeCapability(trace: DiscoveryTrace, options?: { id?: str
         action: "navigate",
         url: toCapabilityUrl(url, baseUrl),
         waitAfter: { kind: "loadState", loadState: "domcontentloaded" },
-        checkpoint: checkpointFor(event, `${id}-cp`),
+        checkpoint: checkpointFor(event, prev, succeeding, `${id}-cp`),
       });
       continue;
     }
@@ -179,7 +354,7 @@ export function synthesizeCapability(trace: DiscoveryTrace, options?: { id?: str
         action: "click",
         target,
         waitAfter: { kind: "loadState", loadState: "domcontentloaded", timeoutMs: 10_000 },
-        checkpoint: checkpointFor(event, `${id}-cp`),
+        checkpoint: checkpointFor(event, prev, succeeding, `${id}-cp`),
       });
       continue;
     }
@@ -190,16 +365,7 @@ export function synthesizeCapability(trace: DiscoveryTrace, options?: { id?: str
       const param = inferParam(event);
       let input: Step["input"];
       if (param) {
-        if (!parameters.has(param.name)) {
-          parameters.set(param.name, {
-            name: param.name,
-            type: param.type,
-            required: true,
-            description: `Discovered from field "${event.description ?? param.name}"`,
-            maskInLogs: param.type === "secret",
-            ...(param.name === "username" && event.typedValue ? { default: event.typedValue } : {}),
-          });
-        }
+        upsertParameter(parameters, param, event);
         input = { source: "parameter", parameter: param.name };
       } else {
         input = { source: "literal", literal: event.typedValue };
@@ -289,11 +455,7 @@ export function synthesizeCapability(trace: DiscoveryTrace, options?: { id?: str
                   id: "final-heading",
                   kind: "visible" as const,
                   onMismatch: "hard" as const,
-                  target: {
-                    description: last.heading,
-                    primary: { strategy: "text" as const, value: last.heading },
-                    fallbacks: [] as Locator[],
-                  },
+                  target: targetFromLabel(last.heading),
                 },
               ],
             },
@@ -311,11 +473,7 @@ export function synthesizeCapability(trace: DiscoveryTrace, options?: { id?: str
               id: "start-heading",
               kind: "visible" as const,
               onMismatch: "hard" as const,
-              target: {
-                description: firstHeading,
-                primary: { strategy: "text" as const, value: firstHeading },
-                fallbacks: [] as Locator[],
-              },
+              target: targetFromLabel(firstHeading),
             },
           ],
         },

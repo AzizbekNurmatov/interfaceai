@@ -175,5 +175,105 @@ test("synthesizer parameterizes inputs and emits locators, outputs, and checkpoi
   expect(fillMember?.target?.fallbacks).toBeDefined();
   expect(capability.preconditions.length).toBeGreaterThan(0);
   expect(capability.postconditions.length).toBeGreaterThan(0);
-  expect(capability.steps.find((s) => s.action === "click")?.checkpoint).toBeTruthy();
+  const username = capability.parameters.find((p) => p.name === "username");
+  expect(username?.default).toBe("TELLER01");
+  expect(username?.required).toBe(false);
+  const logon = capability.steps.find((s) => s.name.includes("Logon"));
+  expect(logon?.checkpoint?.assertions[0]?.target.description).toBe("Main Menu");
+  const logonLocators = [
+    logon?.checkpoint?.assertions[0]?.target.primary,
+    ...(logon?.checkpoint?.assertions[0]?.target.fallbacks ?? []),
+  ];
+  expect(logonLocators.some((l) => l?.strategy === "text" && l.value === "Main Menu")).toBe(true);
+  expect(logonLocators.some((l) => l?.strategy === "css")).toBe(true);
+  expect(logonLocators.some((l) => l?.strategy === "xpath" && l.value.includes("b"))).toBe(true);
+  expect(logon?.checkpoint?.assertions[0]?.target.fallbacks.length).toBeGreaterThan(0);
+});
+
+test("click checkpoints assert the destination page, not the page that was left", () => {
+  const ts = new Date().toISOString();
+  const event = (
+    partial: Partial<DiscoveryTrace["events"][number]> & Pick<DiscoveryTrace["events"][number], "tool" | "urlAfter" | "titleAfter">,
+  ): DiscoveryTrace["events"][number] => ({
+    index: 0,
+    timestamp: ts,
+    reasoning: "",
+    input: {},
+    ok: true,
+    result: "ok",
+    locators: [],
+    ...partial,
+  });
+
+  const trace: DiscoveryTrace = {
+    goal: "Log in as TELLER01 and lookup member 12345 savings balance",
+    startUrl: "http://127.0.0.1:3000/login",
+    applicationName: "MemberCore 7.4",
+    finish: { summary: "ok", successCondition: "Main Menu visible" },
+    events: [
+      event({
+        tool: "navigate",
+        input: { url: "http://127.0.0.1:3000/login" },
+        urlAfter: "http://127.0.0.1:3000/login",
+        titleAfter: "MemberCore 7.4 - Teller Logon",
+        heading: "Teller Workstation Logon",
+      }),
+      event({
+        index: 1,
+        tool: "type",
+        input: { selector: "input[name='txtUID']", value: "TELLER01", isParameter: true, paramName: "username" },
+        urlAfter: "http://127.0.0.1:3000/login",
+        titleAfter: "MemberCore 7.4 - Teller Logon",
+        locators: [{ strategy: "css", value: "input[name='txtUID']" }],
+        description: "User ID",
+        typedValue: "TELLER01",
+        isParameter: true,
+        paramName: "username",
+        heading: "Teller Workstation Logon",
+      }),
+      event({
+        index: 2,
+        tool: "type",
+        input: { selector: "input[name='txtPWD']", value: "PASSWORD" },
+        urlAfter: "http://127.0.0.1:3000/login",
+        titleAfter: "MemberCore 7.4 - Teller Logon",
+        locators: [{ strategy: "css", value: "input[name='txtPWD']" }],
+        description: "Password",
+        typedValue: "PASSWORD",
+        inputType: "password",
+        heading: "Teller Workstation Logon",
+      }),
+      event({
+        index: 3,
+        tool: "click",
+        input: { selector: "input[name='btnLogon']" },
+        urlAfter: "http://127.0.0.1:3000/login",
+        titleAfter: "MemberCore 7.4 - Teller Logon",
+        locators: [{ strategy: "css", value: "input[name='btnLogon']" }],
+        description: "Logon",
+        heading: "Teller Workstation Logon",
+      }),
+      event({
+        index: 4,
+        tool: "click",
+        input: { element_description: "Member Search" },
+        urlAfter: "http://127.0.0.1:3000/dashboard",
+        titleAfter: "MemberCore 7.4 - Main Menu",
+        locators: [{ strategy: "css", value: "a[href='/members/lookup']" }],
+        description: "Member Search",
+        heading: "Main Menu",
+      }),
+    ],
+  };
+
+  const capability = synthesizeCapability(trace, { id: "discovered-member-inquiry" });
+  const logon = capability.steps.find((s) => s.id === "s04-click");
+  const target = logon?.checkpoint?.assertions[0]?.target;
+  expect(target?.description).not.toBe("Teller Workstation Logon");
+  expect(target?.description).toBe("Main Menu");
+  const locators = [target?.primary, ...(target?.fallbacks ?? [])];
+  expect(locators.some((l) => l?.strategy === "text" && l.value === "Main Menu")).toBe(true);
+  expect(locators.some((l) => l?.strategy === "css")).toBe(true);
+  expect(locators.some((l) => l?.strategy === "xpath")).toBe(true);
+  expect(capability.parameters.find((p) => p.name === "username")?.default).toBe("TELLER01");
 });

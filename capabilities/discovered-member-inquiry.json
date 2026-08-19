@@ -1,0 +1,464 @@
+{
+  "schemaVersion": "1.0.0",
+  "id": "discovered-member-inquiry",
+  "name": "Logged in as TELLER01 (password: PASSWORD), navigated to Member Search, looked u",
+  "version": "1.0.0",
+  "description": "Log in as TELLER01 and lookup member 12345 savings balance",
+  "application": {
+    "name": "Legacy application",
+    "baseUrl": "http://127.0.0.1:3000",
+    "originPattern": "^https?://127\\.0\\.0\\.1:3000"
+  },
+  "parameters": [
+    {
+      "name": "username",
+      "type": "string",
+      "required": true,
+      "description": "Discovered from field \"User ID field\"",
+      "default": "TELLER01",
+      "maskInLogs": false
+    },
+    {
+      "name": "password",
+      "type": "secret",
+      "required": true,
+      "description": "Discovered from field \"Password field\"",
+      "maskInLogs": true
+    },
+    {
+      "name": "memberId",
+      "type": "string",
+      "required": true,
+      "description": "Discovered from field \"Member ID field\"",
+      "maskInLogs": false
+    }
+  ],
+  "expectedOutputs": [
+    {
+      "name": "savingsBalance",
+      "type": "string",
+      "description": "Savings Balance value",
+      "extract": {
+        "target": {
+          "description": "Savings Balance value",
+          "primary": {
+            "strategy": "xpath",
+            "value": "//td[contains(., \"Savings Balance\")]/following-sibling::td[1]"
+          },
+          "fallbacks": []
+        },
+        "method": "innerText"
+      }
+    }
+  ],
+  "businessFailures": [
+    {
+      "code": "APPLICATION_ERROR",
+      "description": "Host application displayed an error banner.",
+      "target": {
+        "description": "In-app error banner",
+        "primary": {
+          "strategy": "css",
+          "value": "#tblError"
+        },
+        "fallbacks": [
+          {
+            "strategy": "xpath",
+            "value": "//b[contains(., 'ERROR')]"
+          }
+        ]
+      },
+      "messagePattern": "ERROR",
+      "recoverable": true
+    }
+  ],
+  "preconditions": [
+    {
+      "id": "start-screen",
+      "description": "Expected starting screen after opening the application",
+      "assertions": [
+        {
+          "id": "start-heading",
+          "kind": "visible",
+          "target": {
+            "description": "Teller Workstation Logon",
+            "primary": {
+              "strategy": "text",
+              "value": "Teller Workstation Logon"
+            },
+            "fallbacks": []
+          },
+          "onMismatch": "hard"
+        }
+      ]
+    }
+  ],
+  "steps": [
+    {
+      "id": "s01-navigate",
+      "name": "Open /login",
+      "action": "navigate",
+      "url": "{baseUrl}/login",
+      "waitAfter": {
+        "kind": "loadState",
+        "loadState": "domcontentloaded"
+      },
+      "checkpoint": {
+        "id": "s01-navigate-cp",
+        "description": "Still on expected screen after navigate",
+        "assertions": [
+          {
+            "id": "s01-navigate-cp-visible",
+            "kind": "visible",
+            "target": {
+              "description": "Teller Workstation Logon",
+              "primary": {
+                "strategy": "text",
+                "value": "Teller Workstation Logon"
+              },
+              "fallbacks": []
+            },
+            "onMismatch": "hard"
+          }
+        ]
+      }
+    },
+    {
+      "id": "s02-type",
+      "name": "Enter User ID field",
+      "action": "fill",
+      "target": {
+        "description": "User ID field",
+        "primary": {
+          "strategy": "css",
+          "value": "input[name='txtUID']"
+        },
+        "fallbacks": [
+          {
+            "strategy": "xpath",
+            "value": "//input[@name=\"txtUID\"]"
+          }
+        ]
+      },
+      "input": {
+        "source": "parameter",
+        "parameter": "username"
+      }
+    },
+    {
+      "id": "s03-type",
+      "name": "Enter Password field",
+      "action": "fill",
+      "target": {
+        "description": "Password field",
+        "primary": {
+          "strategy": "css",
+          "value": "input[name='txtPWD']"
+        },
+        "fallbacks": [
+          {
+            "strategy": "xpath",
+            "value": "//input[@name=\"txtPWD\"]"
+          }
+        ]
+      },
+      "input": {
+        "source": "parameter",
+        "parameter": "password"
+      }
+    },
+    {
+      "id": "s04-click",
+      "name": "Click Logon button",
+      "action": "click",
+      "target": {
+        "description": "Logon button",
+        "primary": {
+          "strategy": "css",
+          "value": "input[name='btnLogon']"
+        },
+        "fallbacks": [
+          {
+            "strategy": "xpath",
+            "value": "//input[@name=\"btnLogon\"]"
+          },
+          {
+            "strategy": "text",
+            "value": "Logon",
+            "exact": true
+          }
+        ]
+      },
+      "waitAfter": {
+        "kind": "loadState",
+        "timeoutMs": 10000,
+        "loadState": "domcontentloaded"
+      },
+      "checkpoint": {
+        "id": "s04-click-cp",
+        "description": "Still on expected screen after click",
+        "assertions": [
+          {
+            "id": "s04-click-cp-visible",
+            "kind": "visible",
+            "target": {
+              "description": "Teller Workstation Logon",
+              "primary": {
+                "strategy": "text",
+                "value": "Teller Workstation Logon"
+              },
+              "fallbacks": []
+            },
+            "onMismatch": "hard"
+          }
+        ]
+      }
+    },
+    {
+      "id": "s05-type",
+      "name": "Enter User ID field",
+      "action": "fill",
+      "target": {
+        "description": "User ID field",
+        "primary": {
+          "strategy": "css",
+          "value": "input[name='txtUID']"
+        },
+        "fallbacks": [
+          {
+            "strategy": "xpath",
+            "value": "//input[@name=\"txtUID\"]"
+          }
+        ]
+      },
+      "input": {
+        "source": "parameter",
+        "parameter": "username"
+      }
+    },
+    {
+      "id": "s06-type",
+      "name": "Enter Password field",
+      "action": "fill",
+      "target": {
+        "description": "Password field",
+        "primary": {
+          "strategy": "css",
+          "value": "input[name='txtPWD']"
+        },
+        "fallbacks": [
+          {
+            "strategy": "xpath",
+            "value": "//input[@name=\"txtPWD\"]"
+          }
+        ]
+      },
+      "input": {
+        "source": "parameter",
+        "parameter": "password"
+      }
+    },
+    {
+      "id": "s07-click",
+      "name": "Click Logon button",
+      "action": "click",
+      "target": {
+        "description": "Logon button",
+        "primary": {
+          "strategy": "css",
+          "value": "input[name='btnLogon']"
+        },
+        "fallbacks": [
+          {
+            "strategy": "xpath",
+            "value": "//input[@name=\"btnLogon\"]"
+          },
+          {
+            "strategy": "text",
+            "value": "Logon",
+            "exact": true
+          }
+        ]
+      },
+      "waitAfter": {
+        "kind": "loadState",
+        "timeoutMs": 10000,
+        "loadState": "domcontentloaded"
+      },
+      "checkpoint": {
+        "id": "s07-click-cp",
+        "description": "Still on expected screen after click",
+        "assertions": [
+          {
+            "id": "s07-click-cp-visible",
+            "kind": "visible",
+            "target": {
+              "description": "Main Menu",
+              "primary": {
+                "strategy": "text",
+                "value": "Main Menu"
+              },
+              "fallbacks": []
+            },
+            "onMismatch": "hard"
+          }
+        ]
+      }
+    },
+    {
+      "id": "s08-click",
+      "name": "Click Member Search link",
+      "action": "click",
+      "target": {
+        "description": "Member Search link",
+        "primary": {
+          "strategy": "css",
+          "value": "a[href='/members/lookup']"
+        },
+        "fallbacks": [
+          {
+            "strategy": "xpath",
+            "value": "//a[@href=\"/members/lookup\"]"
+          },
+          {
+            "strategy": "text",
+            "value": "Member Search",
+            "exact": true
+          }
+        ]
+      },
+      "waitAfter": {
+        "kind": "loadState",
+        "timeoutMs": 10000,
+        "loadState": "domcontentloaded"
+      },
+      "checkpoint": {
+        "id": "s08-click-cp",
+        "description": "Still on expected screen after click",
+        "assertions": [
+          {
+            "id": "s08-click-cp-visible",
+            "kind": "visible",
+            "target": {
+              "description": "Member Search",
+              "primary": {
+                "strategy": "text",
+                "value": "Member Search"
+              },
+              "fallbacks": []
+            },
+            "onMismatch": "hard"
+          }
+        ]
+      }
+    },
+    {
+      "id": "s09-type",
+      "name": "Enter Member ID field",
+      "action": "fill",
+      "target": {
+        "description": "Member ID field",
+        "primary": {
+          "strategy": "css",
+          "value": "input[name='memID']"
+        },
+        "fallbacks": [
+          {
+            "strategy": "xpath",
+            "value": "//input[@name=\"memID\"]"
+          }
+        ]
+      },
+      "input": {
+        "source": "parameter",
+        "parameter": "memberId"
+      }
+    },
+    {
+      "id": "s10-click",
+      "name": "Click Search Member File button",
+      "action": "click",
+      "target": {
+        "description": "Search Member File button",
+        "primary": {
+          "strategy": "css",
+          "value": "input[name='btnSearch']"
+        },
+        "fallbacks": [
+          {
+            "strategy": "xpath",
+            "value": "//input[@name=\"btnSearch\"]"
+          },
+          {
+            "strategy": "text",
+            "value": "Search Member File",
+            "exact": true
+          }
+        ]
+      },
+      "waitAfter": {
+        "kind": "loadState",
+        "timeoutMs": 10000,
+        "loadState": "domcontentloaded"
+      },
+      "checkpoint": {
+        "id": "s10-click-cp",
+        "description": "Still on expected screen after click",
+        "assertions": [
+          {
+            "id": "s10-click-cp-visible",
+            "kind": "visible",
+            "target": {
+              "description": "Member Record",
+              "primary": {
+                "strategy": "text",
+                "value": "Member Record"
+              },
+              "fallbacks": []
+            },
+            "onMismatch": "hard"
+          }
+        ]
+      }
+    },
+    {
+      "id": "s11-extract",
+      "name": "Extract savingsBalance",
+      "action": "extract",
+      "target": {
+        "description": "Savings Balance value",
+        "primary": {
+          "strategy": "xpath",
+          "value": "//td[contains(., \"Savings Balance\")]/following-sibling::td[1]"
+        },
+        "fallbacks": []
+      },
+      "extractTo": "savingsBalance"
+    }
+  ],
+  "postconditions": [
+    {
+      "id": "outputs-visible",
+      "description": "The Member Record page for member 12345 is displayed and savingsBalance is extracted as \"$14,250.00\".",
+      "assertions": [
+        {
+          "id": "primary-output-visible",
+          "kind": "visible",
+          "target": {
+            "description": "Savings Balance value",
+            "primary": {
+              "strategy": "xpath",
+              "value": "//td[contains(., \"Savings Balance\")]/following-sibling::td[1]"
+            },
+            "fallbacks": []
+          },
+          "onMismatch": "hard"
+        }
+      ]
+    }
+  ],
+  "metadata": {
+    "discoveredAt": "2026-08-19T10:42:43.584Z",
+    "notes": "Logged in as TELLER01 (password: PASSWORD), navigated to Member Search, looked up member ID 12345 (JANE Q PUBLIC), and extracted the savings balance of $14,250.00."
+  }
+}

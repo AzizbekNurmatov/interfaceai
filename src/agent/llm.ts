@@ -27,7 +27,7 @@ export class AnthropicLlmClient implements LlmClient {
 
   constructor(options?: { apiKey?: string; model?: string }) {
     this.client = new Anthropic({ apiKey: options?.apiKey ?? process.env.ANTHROPIC_API_KEY });
-    this.model = options?.model ?? process.env.DISCOVERY_MODEL ?? "claude-sonnet-4-20250514";
+    this.model = options?.model ?? process.env.DISCOVERY_MODEL ?? "claude-sonnet-4-6";
   }
 
   async complete(args: {
