@@ -1,8 +1,13 @@
 import type { Page } from "playwright";
 import type { MessageParam } from "@anthropic-ai/sdk/resources/messages/messages.js";
 import { getGuardrails } from "../safety/guardrails.js";
-import { SafetyViolation, ValidationFailure } from "../schema/errors.js";
+import { HardFailure, SafetyViolation, ValidationFailure } from "../schema/errors.js";
 import type { Capability } from "../schema/capability.js";
+import {
+  classifyInterventionReason,
+  requestHumanIntervention,
+  type OperatorPrompt,
+} from "../engine/hitl.js";
 import { formatSnapshotForLlm, observePage, snapshotHeading } from "./observer.js";
 import { describeUnresolved, resolveBinding } from "./resolve.js";
 import { DISCOVERY_TOOLS } from "./tools.js";
@@ -13,6 +18,7 @@ import type { DiscoveryTrace, PageSnapshot, TraceEvent } from "./trace.js";
 
 export const MAX_DISCOVERY_STEPS = 15;
 export const DEFAULT_DISCOVERY_TIMEOUT_MS = 120_000;
+export const CONSECUTIVE_FAILURES_BEFORE_HITL = 3;
 
 export interface DiscoverOptions {
   page: Page;
@@ -25,6 +31,9 @@ export interface DiscoverOptions {
   maxSteps?: number;
   timeoutMs?: number;
   applicationName?: string;
+  hitl?: boolean;
+  headed?: boolean;
+  hitlPrompt?: OperatorPrompt;
 }
 
 export interface DiscoverResult {
@@ -56,6 +65,7 @@ export class DiscoveryLoop {
   private snapshot: PageSnapshot | undefined;
   private readonly trace: DiscoveryTrace;
   private readonly startedAt = Date.now();
+  private consecutiveFailures = 0;
 
   constructor(private readonly options: DiscoverOptions) {
     this.trace = {
@@ -130,6 +140,7 @@ export class DiscoveryLoop {
         this.assertBudget(maxSteps, timeoutMs);
         const executed = await this.executeTool(call, turn.text);
         evidence?.record("tool_result", { call, result: executed.result, ok: executed.ok });
+        if (executed.ok) this.consecutiveFailures = 0;
         if (call.name === "finish" && executed.ok) finished = true;
         toolResults.push({
           type: "tool_result",
@@ -171,9 +182,14 @@ export class DiscoveryLoop {
     try {
       return await this.dispatchTool(call, reasoning);
     } catch (error) {
-      if (error instanceof SafetyViolation || error instanceof ValidationFailure) throw error;
+      if (error instanceof SafetyViolation || error instanceof ValidationFailure || error instanceof HardFailure) {
+        throw error;
+      }
       const message = error instanceof Error ? error.message : String(error);
-      return this.fail(call, reasoning, `Action failed: ${message}`);
+      this.consecutiveFailures += 1;
+      const failed = this.fail(call, reasoning, `Action failed: ${message}`);
+      await this.maybeEscalateToHitl(call.name, message);
+      return failed;
     }
   }
 
@@ -212,6 +228,7 @@ export class DiscoveryLoop {
       });
       if (!binding) {
         const message = describeUnresolved(this.snapshot!);
+        this.consecutiveFailures += 1;
         this.record({
           tool: call.name,
           input,
@@ -220,6 +237,7 @@ export class DiscoveryLoop {
           locators: [],
           reasoning,
         });
+        await this.maybeEscalateToHitl(call.name, message);
         return { ok: false, result: message };
       }
 
@@ -353,6 +371,39 @@ export class DiscoveryLoop {
       reasoning,
     });
     return { ok: false, result };
+  }
+
+  private async maybeEscalateToHitl(stepId: string, message: string): Promise<void> {
+    if (!this.options.hitl) return;
+
+    const pageText = this.snapshot?.textPreview ?? "";
+    const reason = classifyInterventionReason({ message, pageText });
+    const stuck = this.consecutiveFailures >= CONSECUTIVE_FAILURES_BEFORE_HITL;
+    const blocking = reason === "CAPTCHA_CHALLENGE" || reason === "UNEXPECTED_DIALOG";
+    if (!stuck && !blocking) return;
+
+    const capabilityId = this.options.capabilityId ?? "discovery";
+    const handoff = await requestHumanIntervention(this.options.page, {
+      capabilityId,
+      stepId,
+      message,
+      reason: blocking ? reason : stuck ? "LOCATOR_FAILURE" : reason,
+      headed: this.options.headed,
+      prompt: this.options.hitlPrompt,
+      evidence: this.options.evidence,
+    });
+    this.options.evidence?.record("hitl_decision", {
+      stepId,
+      decision: handoff.decision,
+      reason: handoff.request.reason,
+    });
+
+    if (handoff.decision === "abort") {
+      throw new HardFailure(`Discovery aborted by operator at ${stepId}: ${message}`, { stepId });
+    }
+
+    this.consecutiveFailures = 0;
+    await this.refreshSnapshot();
   }
 
   private async refreshSnapshot(): Promise<void> {

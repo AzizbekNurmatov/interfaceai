@@ -10,6 +10,7 @@ import {
 } from "../schema/errors.js";
 import type { ParameterValues } from "../schema/capability.js";
 import { logger } from "../utils/logger.js";
+import { ReplayEvidence } from "./evidence.js";
 import { ReplayEngine } from "./replay-engine.js";
 
 export interface CliArgs {
@@ -73,6 +74,13 @@ export async function runReplayCli(argv = process.argv.slice(2)): Promise<number
   try {
     const args = parseArgs(argv);
     const capability = loadCapabilityFile(args.capabilityPath);
+    const evidence = new ReplayEvidence({ truncate: true });
+
+    if (args.hitl && !args.headed) {
+      logger.warn(
+        "HITL is enabled while headless: the live page stays open but is not visible. Use --headed for on-screen control, or --no-hitl in CI.",
+      );
+    }
 
     browser = await chromium.launch({ headless: !args.headed, slowMo: args.headed ? 50 : 0 });
     const context = await browser.newContext();
@@ -83,12 +91,29 @@ export async function runReplayCli(argv = process.argv.slice(2)): Promise<number
       capability,
       parameters: args.parameters,
       hitl: args.hitl,
+      headed: args.headed,
+      evidence,
     });
 
     const result = await engine.run();
     if (result.status === "success") {
-      logger.info("replay succeeded", { outputs: result.outputs });
-      console.log(JSON.stringify({ status: "success", outputs: result.outputs }, null, 2));
+      logger.info("replay succeeded", {
+        outputs: result.outputs,
+        interventions: result.interventions.length,
+        log: evidence.path,
+      });
+      console.log(
+        JSON.stringify(
+          {
+            status: "success",
+            outputs: result.outputs,
+            interventions: result.interventions.length,
+            log: evidence.path,
+          },
+          null,
+          2,
+        ),
+      );
       return 0;
     }
 
@@ -96,6 +121,7 @@ export async function runReplayCli(argv = process.argv.slice(2)): Promise<number
       code: result.failure.code,
       message: result.failure.message,
       observedText: result.failure.observedText,
+      log: evidence.path,
     });
     console.log(
       JSON.stringify(

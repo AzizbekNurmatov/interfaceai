@@ -1,0 +1,20 @@
+{"ts":"2026-08-20T10:58:58.969Z","event":"replay_start","data":{"capabilityId":"member-balance-inquiry","hitl":true,"headed":true}}
+{"ts":"2026-08-20T10:58:58.973Z","event":"step_start","data":{"stepId":"open-logon","action":"navigate"}}
+{"ts":"2026-08-20T10:58:59.106Z","event":"step_ok","data":{"stepId":"open-logon"}}
+{"ts":"2026-08-20T10:58:59.124Z","event":"step_start","data":{"stepId":"enter-username","action":"fill"}}
+{"ts":"2026-08-20T10:59:09.140Z","event":"step_fail","data":{"stepId":"enter-username","message":"Could not resolve target \"User ID field\" using 2 locator(s)","locatorDescription":"User ID field","attemptedLocators":["css=input[name='broken_fake_id']","xpath=//input[@name='broken_fake_id']"]}}
+{"ts":"2026-08-20T10:59:09.303Z","event":"hitl_request","data":{"capabilityId":"member-balance-inquiry","stepId":"enter-username","reason":"LOCATOR_FAILURE","currentUrl":"http://127.0.0.1:3000/login","screenshotPath":"C:\\Users\\azizb\\OneDrive\\Desktop\\interfaceai\\evidence\\interventions\\1787223549151-enter-username-e99wj5.png","message":"Could not resolve target \"User ID field\" using 2 locator(s)"}}
+{"ts":"2026-08-20T10:59:40.705Z","event":"hitl_decision","data":{"stepId":"enter-username","reason":"LOCATOR_FAILURE","decision":"skip","url":"http://127.0.0.1:3000/login","screenshotPath":"C:\\Users\\azizb\\OneDrive\\Desktop\\interfaceai\\evidence\\interventions\\1787223549151-enter-username-e99wj5.png"}}
+{"ts":"2026-08-20T10:59:40.706Z","event":"hitl_intervention","data":{"request":{"capabilityId":"member-balance-inquiry","stepId":"enter-username","reason":"LOCATOR_FAILURE","currentUrl":"http://127.0.0.1:3000/login","screenshotPath":"C:\\Users\\azizb\\OneDrive\\Desktop\\interfaceai\\evidence\\interventions\\1787223549151-enter-username-e99wj5.png","message":"Could not resolve target \"User ID field\" using 2 locator(s)"},"decision":"skip"}}
+{"ts":"2026-08-20T10:59:40.707Z","event":"hitl_skip","data":{"stepId":"enter-username","optional":false}}
+{"ts":"2026-08-20T10:59:40.707Z","event":"step_start","data":{"stepId":"enter-password","action":"fill"}}
+{"ts":"2026-08-20T10:59:40.804Z","event":"step_ok","data":{"stepId":"enter-password"}}
+{"ts":"2026-08-20T10:59:40.805Z","event":"step_start","data":{"stepId":"submit-logon","action":"click"}}
+{"ts":"2026-08-20T10:59:42.881Z","event":"step_ok","data":{"stepId":"submit-logon"}}
+{"ts":"2026-08-20T10:59:42.881Z","event":"step_start","data":{"stepId":"open-member-search","action":"click"}}
+{"ts":"2026-08-20T10:59:43.074Z","event":"step_ok","data":{"stepId":"open-member-search"}}
+{"ts":"2026-08-20T10:59:43.074Z","event":"step_start","data":{"stepId":"enter-member-id","action":"fill"}}
+{"ts":"2026-08-20T10:59:43.161Z","event":"step_ok","data":{"stepId":"enter-member-id"}}
+{"ts":"2026-08-20T10:59:43.162Z","event":"step_start","data":{"stepId":"submit-inquiry","action":"click"}}
+{"ts":"2026-08-20T10:59:45.554Z","event":"step_ok","data":{"stepId":"submit-inquiry"}}
+{"ts":"2026-08-20T10:59:45.578Z","event":"replay_success","data":{"outputs":{"memberName":"JANE Q PUBLIC","savingsBalance":"$14,250.00","checkingBalance":"$3,120.50","accountStatus":"Active"}}}

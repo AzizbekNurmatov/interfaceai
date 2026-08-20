@@ -20,7 +20,12 @@ import {
 } from "../schema/errors.js";
 import { getGuardrails } from "../safety/guardrails.js";
 import { captureEvidence } from "../utils/screenshots.js";
-import { handoffToHuman, type HitlDecision } from "./hitl.js";
+import { ReplayEvidence, type InterventionRecord } from "./evidence.js";
+import {
+  canPromptOperator,
+  requestHumanIntervention,
+  type OperatorPrompt,
+} from "./hitl.js";
 import { describeLocator, isTargetVisible, resolveTarget } from "./locators.js";
 
 export interface ReplayOptions {
@@ -28,21 +33,29 @@ export interface ReplayOptions {
   capability: Capability;
   parameters: ParameterValues;
   /**
-   * When true (default in CLI), HardFailure triggers page.pause() + CLI prompt.
-   * Tests should set this to false and assert on HardFailure instead.
+   * When true (default in CLI), HardFailure pauses the live session and prompts.
+   * Tests should set this to false, or inject `hitlPrompt`, rather than hang on stdin.
    */
   hitl?: boolean;
+  /** True when the browser window is visible so the operator can take over. */
+  headed?: boolean;
+  /** Injected operator. Used by tests to mock R/A/S without readline. */
+  hitlPrompt?: OperatorPrompt;
+  pauseInspector?: boolean;
+  evidence?: ReplayEvidence;
 }
 
 export interface ReplaySuccess {
   status: "success";
   outputs: OutputValues;
+  interventions: InterventionRecord[];
 }
 
 export interface ReplayBusinessResult {
   status: "business_failure";
   failure: BusinessFailure;
   outputs: OutputValues;
+  interventions: InterventionRecord[];
 }
 
 export type ReplayResult = ReplaySuccess | ReplayBusinessResult;
@@ -54,17 +67,37 @@ export class ReplayEngine {
   private readonly capability: Capability;
   private readonly parameters: ParameterValues;
   private readonly hitl: boolean;
+  private readonly headed: boolean;
+  private readonly hitlPrompt?: OperatorPrompt;
+  private readonly pauseInspector: boolean;
+  private readonly evidence: ReplayEvidence;
   private readonly outputs: OutputValues = {};
+  private unexpectedDialog: { type: string; message: string } | undefined;
+  private dialogHookInstalled = false;
 
   constructor(options: ReplayOptions) {
     this.page = options.page;
     this.capability = options.capability;
     this.parameters = options.parameters;
     this.hitl = options.hitl ?? true;
+    this.headed = options.headed ?? false;
+    this.hitlPrompt = options.hitlPrompt;
+    this.pauseInspector = options.pauseInspector ?? process.env.HITL_PAUSE_INSPECTOR === "1";
+    this.evidence = options.evidence ?? new ReplayEvidence({ truncate: false });
+  }
+
+  get interventions(): InterventionRecord[] {
+    return this.evidence.interventions;
   }
 
   async run(): Promise<ReplayResult> {
     this.assertParameters();
+    this.installDialogHook();
+    this.evidence.record("replay_start", {
+      capabilityId: this.capability.id,
+      hitl: this.hitl,
+      headed: this.headed,
+    });
 
     try {
       const steps = this.capability.steps;
@@ -81,7 +114,16 @@ export class ReplayEngine {
       await this.runCheckpoints(this.capability.preconditions, "precondition");
       const landingFailure = await this.detectBusinessFailure("precondition");
       if (landingFailure) {
-        return { status: "business_failure", failure: landingFailure, outputs: { ...this.outputs } };
+        this.evidence.record("business_failure", {
+          code: landingFailure.code,
+          stepId: landingFailure.stepId,
+        });
+        return {
+          status: "business_failure",
+          failure: landingFailure,
+          outputs: { ...this.outputs },
+          interventions: [...this.evidence.interventions],
+        };
       }
 
       for (const step of steps.slice(start)) {
@@ -91,10 +133,32 @@ export class ReplayEngine {
       await this.extractDeclaredOutputs();
       await this.runCheckpoints(this.capability.postconditions, "postcondition");
 
-      return { status: "success", outputs: { ...this.outputs } };
+      this.evidence.record("replay_success", { outputs: this.outputs });
+      return {
+        status: "success",
+        outputs: { ...this.outputs },
+        interventions: [...this.evidence.interventions],
+      };
     } catch (error) {
       if (error instanceof BusinessFailure) {
-        return { status: "business_failure", failure: error, outputs: { ...this.outputs } };
+        this.evidence.record("business_failure", {
+          code: error.code,
+          stepId: error.stepId,
+        });
+        return {
+          status: "business_failure",
+          failure: error,
+          outputs: { ...this.outputs },
+          interventions: [...this.evidence.interventions],
+        };
+      }
+      if (error instanceof HardFailure) {
+        this.evidence.record("hard_failure", {
+          message: error.message,
+          stepId: error.stepId,
+          locatorDescription: error.locatorDescription,
+          attemptedLocators: error.attemptedLocators,
+        });
       }
       throw error;
     }
@@ -119,11 +183,29 @@ export class ReplayEngine {
     }
   }
 
+  private installDialogHook(): void {
+    if (this.dialogHookInstalled) return;
+    this.dialogHookInstalled = true;
+    this.page.on("dialog", (dialog) => {
+      this.unexpectedDialog = { type: dialog.type(), message: dialog.message() };
+      void dialog.dismiss().catch(() => undefined);
+    });
+  }
+
+  private consumeUnexpectedDialog(stepId: string): void {
+    const dialog = this.unexpectedDialog;
+    if (!dialog) return;
+    this.unexpectedDialog = undefined;
+    throw new HardFailure(`Unexpected ${dialog.type} dialog: ${dialog.message}`, { stepId });
+  }
+
   private async runStepWithHitl(step: Step): Promise<void> {
     let attempts = 0;
     for (;;) {
       try {
+        this.evidence.record("step_start", { stepId: step.id, action: step.action });
         await this.executeStep(step);
+        this.consumeUnexpectedDialog(step.id);
         const business = await this.detectBusinessFailure(step.id);
         if (business) throw business;
         if (step.waitAfter) {
@@ -132,37 +214,95 @@ export class ReplayEngine {
         if (step.checkpoint) {
           await this.runCheckpoint(step.checkpoint);
         }
+        this.evidence.record("step_ok", { stepId: step.id });
         return;
       } catch (error) {
         if (error instanceof BusinessFailure || error instanceof SafetyViolation) throw error;
-        if (!(error instanceof HardFailure)) {
+        const hard =
+          error instanceof HardFailure
+            ? error
+            : new HardFailure(error instanceof Error ? error.message : String(error), {
+                stepId: step.id,
+                cause: error,
+              });
+
+        this.evidence.record("step_fail", {
+          stepId: step.id,
+          message: hard.message,
+          locatorDescription: hard.locatorDescription,
+          attemptedLocators: hard.attemptedLocators,
+        });
+
+        if (!this.hitl) throw hard;
+        if (!canPromptOperator(this.hitlPrompt)) {
           throw new HardFailure(
-            error instanceof Error ? error.message : String(error),
-            { stepId: step.id, cause: error },
+            "HITL required but this process is non-interactive. Pass --no-hitl in CI.",
+            { stepId: step.id, cause: hard },
           );
         }
-        if (!this.hitl) throw error;
 
         attempts += 1;
         if (attempts > MAX_HITL_RETRIES) {
           throw new HardFailure(`HITL retry limit exceeded for step ${step.id}`, {
             stepId: step.id,
-            cause: error,
+            cause: hard,
           });
         }
 
-        const decision: HitlDecision = await handoffToHuman(this.page, error);
-        if (decision === "abort") throw error;
-        if (decision === "skip") {
-          if (!step.optional) {
-            throw new HardFailure(
-              `HITL skipped a required step "${step.id}". Mark the step optional in the capability to allow this.`,
-              { stepId: step.id, cause: error },
-            );
-          }
+        const handoff = await requestHumanIntervention(this.page, {
+          capabilityId: this.capability.id,
+          stepId: step.id,
+          message: hard.message,
+          failure: hard,
+          headed: this.headed,
+          pauseInspector: this.pauseInspector,
+          prompt: this.hitlPrompt,
+          evidence: this.evidence,
+        });
+        this.evidence.recordIntervention(handoff.request, handoff.decision);
+
+        if (handoff.decision === "abort") throw hard;
+        if (handoff.decision === "skip") {
+          this.evidence.record("hitl_skip", { stepId: step.id, optional: Boolean(step.optional) });
           return;
         }
+
+        const state = await this.verifyPageStateAfterHandoff(step);
+        if (state === "step-satisfied") return;
       }
+    }
+  }
+
+  /**
+   * After the operator presses R: keep the live page, confirm it is still
+   * usable, and re-evaluate the step checkpoint. If the human already completed
+   * the step, skip re-issuing the action.
+   */
+  private async verifyPageStateAfterHandoff(step: Step): Promise<"step-satisfied" | "retry"> {
+    if (this.page.isClosed()) {
+      throw new HardFailure("HITL resume failed: the live page was closed", { stepId: step.id });
+    }
+    getGuardrails().assertNavigationAllowed(this.page.url(), step.id);
+    this.evidence.record("hitl_resume_state", {
+      stepId: step.id,
+      url: this.page.url(),
+    });
+
+    if (!step.checkpoint) return "retry";
+    try {
+      await this.runCheckpoint(step.checkpoint);
+      this.evidence.record("hitl_checkpoint_satisfied", {
+        stepId: step.id,
+        checkpointId: step.checkpoint.id,
+      });
+      return "step-satisfied";
+    } catch (error) {
+      if (error instanceof BusinessFailure || error instanceof SafetyViolation) throw error;
+      this.evidence.record("hitl_checkpoint_unsatisfied", {
+        stepId: step.id,
+        message: error instanceof Error ? error.message : String(error),
+      });
+      return "retry";
     }
   }
 

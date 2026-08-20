@@ -35,6 +35,16 @@ Open http://127.0.0.1:3000/login
 
 src/safety/guardrails.config.json restricts navigation to localhost:3000 / 127.0.0.1:3000, blocks keywords such as WIRE_TRANSFER and DELETE, and redacts SSNs, card numbers, and password fields from logs.
 
+## Human-in-the-Loop (HITL)
+
+Hard failures (broken locators, unexpected dialogs, captchas) pause the **live** Playwright page instead of crashing. The operator keeps that session and chooses:
+
+- **[R]** Resume from the current page (checkpoint re-check, then retry the step)
+- **[A]** Abort and record a hard failure
+- **[S]** Skip the failed step and continue
+
+Screenshots land in `evidence/interventions/`. Replay writes `evidence/replay-run.log`. Use `--headed` so the window is visible; `--no-hitl` fails immediately for CI.
+
 ## Commands
 
     npm install
@@ -43,5 +53,5 @@ src/safety/guardrails.config.json restricts navigation to localhost:3000 / 127.0
     npm test
     npm run mock:server
     npm run discover -- --goal "Log in as TELLER01 and lookup member 12345 savings balance" --url http://127.0.0.1:3000/login
-    npm run replay -- --capability capabilities/discovered-member-inquiry.json --param password=PASSWORD --param memberId=12345 --headless --no-hitl
+    npm run replay -- --capability capabilities/discovered-member-inquiry.json --param password=PASSWORD --param memberId=12345 --headed
     npm run replay -- --capability capabilities/member-balance-inquiry.json --param password=PASSWORD --param memberId=12345 --headless --no-hitl

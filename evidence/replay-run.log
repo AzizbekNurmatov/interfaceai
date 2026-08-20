@@ -1,0 +1,16 @@
+{"ts":"2026-08-20T11:05:58.417Z","event":"replay_start","data":{"capabilityId":"member-balance-inquiry","hitl":false,"headed":false}}
+{"ts":"2026-08-20T11:05:58.420Z","event":"step_start","data":{"stepId":"open-logon","action":"navigate"}}
+{"ts":"2026-08-20T11:05:58.491Z","event":"step_ok","data":{"stepId":"open-logon"}}
+{"ts":"2026-08-20T11:05:58.517Z","event":"step_start","data":{"stepId":"enter-username","action":"fill"}}
+{"ts":"2026-08-20T11:05:58.567Z","event":"step_ok","data":{"stepId":"enter-username"}}
+{"ts":"2026-08-20T11:05:58.568Z","event":"step_start","data":{"stepId":"enter-password","action":"fill"}}
+{"ts":"2026-08-20T11:05:58.592Z","event":"step_ok","data":{"stepId":"enter-password"}}
+{"ts":"2026-08-20T11:05:58.593Z","event":"step_start","data":{"stepId":"submit-logon","action":"click"}}
+{"ts":"2026-08-20T11:05:58.738Z","event":"step_ok","data":{"stepId":"submit-logon"}}
+{"ts":"2026-08-20T11:05:58.738Z","event":"step_start","data":{"stepId":"open-member-search","action":"click"}}
+{"ts":"2026-08-20T11:05:58.834Z","event":"step_ok","data":{"stepId":"open-member-search"}}
+{"ts":"2026-08-20T11:05:58.834Z","event":"step_start","data":{"stepId":"enter-member-id","action":"fill"}}
+{"ts":"2026-08-20T11:05:58.857Z","event":"step_ok","data":{"stepId":"enter-member-id"}}
+{"ts":"2026-08-20T11:05:58.858Z","event":"step_start","data":{"stepId":"submit-inquiry","action":"click"}}
+{"ts":"2026-08-20T11:05:59.449Z","event":"step_ok","data":{"stepId":"submit-inquiry"}}
+{"ts":"2026-08-20T11:05:59.470Z","event":"replay_success","data":{"outputs":{"memberName":"JANE Q PUBLIC","savingsBalance":"$14,250.00","checkingBalance":"$3,120.50","accountStatus":"Active"}}}

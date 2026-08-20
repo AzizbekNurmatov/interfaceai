@@ -7,7 +7,7 @@
 
 import "dotenv/config";
 import { chromium } from "playwright";
-import { ValidationFailure, formatValidationIssues, isValidationFailure, isSafetyViolation } from "../schema/index.js";
+import { ValidationFailure, formatValidationIssues, isValidationFailure, isSafetyViolation, isHardFailure } from "../schema/index.js";
 import { DiscoveryEvidence, DISCOVERY_SCREENSHOT_PATH } from "./evidence.js";
 import { runDiscoveryLoop } from "./discover.js";
 
@@ -23,6 +23,7 @@ export interface DiscoveryCliArgs {
   headed: boolean;
   out: string;
   maxSteps?: number;
+  hitl: boolean;
 }
 
 export function parseDiscoverArgs(argv: string[]): DiscoveryCliArgs {
@@ -31,6 +32,7 @@ export function parseDiscoverArgs(argv: string[]): DiscoveryCliArgs {
   let headed = false;
   let out = "capabilities/discovered-member-inquiry.json";
   let maxSteps: number | undefined;
+  let hitl = true;
 
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
@@ -40,6 +42,8 @@ export function parseDiscoverArgs(argv: string[]): DiscoveryCliArgs {
     else if (arg === "--headless") headed = false;
     else if (arg === "--out") out = argv[++i] ?? out;
     else if (arg === "--max-steps") maxSteps = Number(argv[++i]);
+    else if (arg === "--no-hitl") hitl = false;
+    else if (arg === "--hitl") hitl = true;
     else if (arg?.startsWith("-")) {
       throw new ValidationFailure(`Unknown flag: ${arg}`);
     }
@@ -47,7 +51,7 @@ export function parseDiscoverArgs(argv: string[]): DiscoveryCliArgs {
 
   if (!goal) throw new ValidationFailure("Missing --goal <text>");
   if (!url) throw new ValidationFailure("Missing --url <http url>");
-  return { goal, url, headed, out, maxSteps };
+  return { goal, url, headed, out, maxSteps, hitl };
 }
 
 export async function runDiscoveryCli(argv = process.argv.slice(2)): Promise<number> {
@@ -70,6 +74,8 @@ export async function runDiscoveryCli(argv = process.argv.slice(2)): Promise<num
       capabilityId: "discovered-member-inquiry",
       evidence,
       maxSteps: args.maxSteps,
+      hitl: args.hitl,
+      headed: args.headed,
     });
     await page.screenshot({ path: DISCOVERY_SCREENSHOT_PATH, fullPage: true });
     evidence.record("final_screenshot", { path: DISCOVERY_SCREENSHOT_PATH });
@@ -107,6 +113,20 @@ if (isDirect) {
       if (isSafetyViolation(error)) {
         console.error(JSON.stringify({ status: "safety_violation", rule: error.rule, message: error.message }, null, 2));
         process.exit(4);
+      }
+      if (isHardFailure(error)) {
+        console.error(
+          JSON.stringify(
+            {
+              status: "hard_failure",
+              message: error.message,
+              stepId: error.stepId,
+            },
+            null,
+            2,
+          ),
+        );
+        process.exit(3);
       }
       console.error(error instanceof Error ? error.message : error);
       process.exit(1);

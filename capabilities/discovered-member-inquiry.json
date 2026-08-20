@@ -13,7 +13,7 @@
     {
       "name": "username",
       "type": "string",
-      "required": true,
+      "required": false,
       "description": "Discovered from field \"User ID field\"",
       "default": "TELLER01",
       "maskInLogs": false
@@ -86,7 +86,24 @@
               "strategy": "text",
               "value": "Teller Workstation Logon"
             },
-            "fallbacks": []
+            "fallbacks": [
+              {
+                "strategy": "css",
+                "value": "b:has-text(\"Teller Workstation Logon\")"
+              },
+              {
+                "strategy": "xpath",
+                "value": "//b[contains(., 'Teller Workstation Logon')]"
+              },
+              {
+                "strategy": "css",
+                "value": "font:has-text(\"Teller Workstation Logon\")"
+              },
+              {
+                "strategy": "xpath",
+                "value": "//font[contains(., 'Teller Workstation Logon')]"
+              }
+            ]
           },
           "onMismatch": "hard"
         }
@@ -105,18 +122,47 @@
       },
       "checkpoint": {
         "id": "s01-navigate-cp",
-        "description": "Still on expected screen after navigate",
+        "description": "Destination screen after navigate",
         "assertions": [
           {
             "id": "s01-navigate-cp-visible",
             "kind": "visible",
             "target": {
-              "description": "Teller Workstation Logon",
+              "description": "Teller Logon",
               "primary": {
                 "strategy": "text",
-                "value": "Teller Workstation Logon"
+                "value": "Teller Logon"
               },
-              "fallbacks": []
+              "fallbacks": [
+                {
+                  "strategy": "css",
+                  "value": "b:has-text(\"Teller Logon\")"
+                },
+                {
+                  "strategy": "xpath",
+                  "value": "//b[contains(., 'Teller Logon')]"
+                },
+                {
+                  "strategy": "css",
+                  "value": "font:has-text(\"Teller Logon\")"
+                },
+                {
+                  "strategy": "xpath",
+                  "value": "//font[contains(., 'Teller Logon')]"
+                },
+                {
+                  "strategy": "css",
+                  "value": "input[name='txtUID']"
+                },
+                {
+                  "strategy": "xpath",
+                  "value": "//input[@name=\"txtUID\"]"
+                },
+                {
+                  "strategy": "text",
+                  "value": "User ID field"
+                }
+              ]
             },
             "onMismatch": "hard"
           }
@@ -196,18 +242,35 @@
       },
       "checkpoint": {
         "id": "s04-click-cp",
-        "description": "Still on expected screen after click",
+        "description": "Destination screen after click",
         "assertions": [
           {
             "id": "s04-click-cp-visible",
             "kind": "visible",
             "target": {
-              "description": "Teller Workstation Logon",
+              "description": "Main Menu",
               "primary": {
                 "strategy": "text",
-                "value": "Teller Workstation Logon"
+                "value": "Main Menu"
               },
-              "fallbacks": []
+              "fallbacks": [
+                {
+                  "strategy": "css",
+                  "value": "b:has-text(\"Main Menu\")"
+                },
+                {
+                  "strategy": "xpath",
+                  "value": "//b[contains(., 'Main Menu')]"
+                },
+                {
+                  "strategy": "css",
+                  "value": "font:has-text(\"Main Menu\")"
+                },
+                {
+                  "strategy": "xpath",
+                  "value": "//font[contains(., 'Main Menu')]"
+                }
+              ]
             },
             "onMismatch": "hard"
           }
@@ -287,7 +350,7 @@
       },
       "checkpoint": {
         "id": "s07-click-cp",
-        "description": "Still on expected screen after click",
+        "description": "Destination screen after click",
         "assertions": [
           {
             "id": "s07-click-cp-visible",
@@ -298,7 +361,41 @@
                 "strategy": "text",
                 "value": "Main Menu"
               },
-              "fallbacks": []
+              "fallbacks": [
+                {
+                  "strategy": "css",
+                  "value": "b:has-text(\"Main Menu\")"
+                },
+                {
+                  "strategy": "xpath",
+                  "value": "//b[contains(., 'Main Menu')]"
+                },
+                {
+                  "strategy": "css",
+                  "value": "font:has-text(\"Main Menu\")"
+                },
+                {
+                  "strategy": "xpath",
+                  "value": "//font[contains(., 'Main Menu')]"
+                },
+                {
+                  "strategy": "css",
+                  "value": "a[href='/members/lookup']"
+                },
+                {
+                  "strategy": "xpath",
+                  "value": "//a[@href=\"/members/lookup\"]"
+                },
+                {
+                  "strategy": "text",
+                  "value": "Member Search",
+                  "exact": true
+                },
+                {
+                  "strategy": "text",
+                  "value": "Member Search link"
+                }
+              ]
             },
             "onMismatch": "hard"
           }
@@ -334,7 +431,7 @@
       },
       "checkpoint": {
         "id": "s08-click-cp",
-        "description": "Still on expected screen after click",
+        "description": "Destination screen after click",
         "assertions": [
           {
             "id": "s08-click-cp-visible",
@@ -345,7 +442,36 @@
                 "strategy": "text",
                 "value": "Member Search"
               },
-              "fallbacks": []
+              "fallbacks": [
+                {
+                  "strategy": "css",
+                  "value": "b:has-text(\"Member Search\")"
+                },
+                {
+                  "strategy": "xpath",
+                  "value": "//b[contains(., 'Member Search')]"
+                },
+                {
+                  "strategy": "css",
+                  "value": "font:has-text(\"Member Search\")"
+                },
+                {
+                  "strategy": "xpath",
+                  "value": "//font[contains(., 'Member Search')]"
+                },
+                {
+                  "strategy": "css",
+                  "value": "input[name='memID']"
+                },
+                {
+                  "strategy": "xpath",
+                  "value": "//input[@name=\"memID\"]"
+                },
+                {
+                  "strategy": "text",
+                  "value": "Member ID field"
+                }
+              ]
             },
             "onMismatch": "hard"
           }
@@ -403,7 +529,7 @@
       },
       "checkpoint": {
         "id": "s10-click-cp",
-        "description": "Still on expected screen after click",
+        "description": "Destination screen after click",
         "assertions": [
           {
             "id": "s10-click-cp-visible",
@@ -414,7 +540,32 @@
                 "strategy": "text",
                 "value": "Member Record"
               },
-              "fallbacks": []
+              "fallbacks": [
+                {
+                  "strategy": "css",
+                  "value": "b:has-text(\"Member Record\")"
+                },
+                {
+                  "strategy": "xpath",
+                  "value": "//b[contains(., 'Member Record')]"
+                },
+                {
+                  "strategy": "css",
+                  "value": "font:has-text(\"Member Record\")"
+                },
+                {
+                  "strategy": "xpath",
+                  "value": "//font[contains(., 'Member Record')]"
+                },
+                {
+                  "strategy": "xpath",
+                  "value": "//td[contains(., \"Savings Balance\")]/following-sibling::td[1]"
+                },
+                {
+                  "strategy": "text",
+                  "value": "Savings Balance value"
+                }
+              ]
             },
             "onMismatch": "hard"
           }
@@ -458,7 +609,7 @@
     }
   ],
   "metadata": {
-    "discoveredAt": "2026-08-19T10:42:43.584Z",
+    "discoveredAt": "2026-08-20T10:07:52.534Z",
     "notes": "Logged in as TELLER01 (password: PASSWORD), navigated to Member Search, looked up member ID 12345 (JANE Q PUBLIC), and extracted the savings balance of $14,250.00."
   }
 }
